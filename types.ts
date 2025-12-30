@@ -8,6 +8,8 @@ export interface AnalysisResult {
   referenceQuotes: string[];
 }
 
+export type AppealType = 'Medical Necessity' | 'Expedited/Urgent' | 'Experimental/Investigational' | 'Peer-to-Peer Request';
+
 export interface AppealLetterRequest {
   patientName: string;
   policyNumber: string;
@@ -15,6 +17,7 @@ export interface AppealLetterRequest {
   denialReason: string;
   clinicalEvidence: string;
   cptCode: string;
+  templateType: AppealType;
 }
 
 export enum View {
@@ -32,6 +35,13 @@ export interface PolicyHistoryEntry {
   title: string;
 }
 
+export interface PolicyDigest {
+  summary: string;
+  keyCriteria: string[];
+  exclusionCriteria: string[];
+  documentationChecklist: string[];
+}
+
 export interface MedicalPolicy {
   id: string;
   carrier: string;
@@ -42,6 +52,7 @@ export interface MedicalPolicy {
   content: string;
   lastUpdated: string;
   history?: PolicyHistoryEntry[];
+  digest?: PolicyDigest;
 }
 
 export interface AuthRecord {

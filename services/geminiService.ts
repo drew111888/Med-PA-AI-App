@@ -1,8 +1,8 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping } from "../types.ts";
+import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping, PolicyDigest } from "../types.ts";
 import { deIdentify, reIdentify } from "./complianceService.ts";
 
-// Initialize the Gemini API client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
@@ -39,7 +39,7 @@ export const analyzeGuidelines = async (
     model: 'gemini-3-pro-preview',
     contents: prompt,
     config: {
-      systemInstruction: "You are a senior medical necessity reviewer. Your task is to compare clinical documentation against insurance policy criteria. Be objective, precise, and identify specific missing documentation elements required for authorization approval.",
+      systemInstruction: "You are a senior medical necessity reviewer. Your task is to compare clinical documentation against insurance policy criteria. Be objective, precise, and identify specific missing documentation elements required for authorization approval. Return valid JSON.",
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -60,11 +60,37 @@ export const analyzeGuidelines = async (
   
   if (useSecureMode) {
     result.reasoning = reIdentify(result.reasoning, mapping);
-    result.missingRequirements = result.missingRequirements.map(r => reIdentify(r, mapping));
-    result.suggestedActionItems = result.suggestedActionItems.map(a => reIdentify(a, mapping));
+    result.missingRequirements = (result.missingRequirements || []).map(r => reIdentify(r, mapping));
+    result.suggestedActionItems = (result.suggestedActionItems || []).map(a => reIdentify(a, mapping));
   }
 
   return result;
+};
+
+/**
+ * Generates a structured digest of a medical policy.
+ */
+export const generatePolicyDigest = async (policyContent: string): Promise<PolicyDigest> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: `Summarize this medical policy into a structured digest for medical office staff. Focus on what is required to get an authorization approved. \n\nPOLICY:\n${policyContent}`,
+    config: {
+      systemInstruction: "You are a clinical policy analyst. Extract requirements, exclusions, and documentation checklists from long medical policies. Return valid JSON.",
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING },
+          keyCriteria: { type: Type.ARRAY, items: { type: Type.STRING } },
+          exclusionCriteria: { type: Type.ARRAY, items: { type: Type.STRING } },
+          documentationChecklist: { type: Type.ARRAY, items: { type: Type.STRING } }
+        },
+        required: ["summary", "keyCriteria", "documentationChecklist"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
 };
 
 /**
@@ -92,22 +118,28 @@ export const generateAppealLetter = async (request: AppealLetterRequest, useSecu
   }
 
   const prompt = `
-    Draft a professional medical appeal letter for the following case:
+    Draft a formal ${req.templateType} medical appeal letter.
+    
     Patient: ${req.patientName}
     Policy: ${req.policyNumber}
     Insurance: ${req.insuranceProvider}
     CPT: ${req.cptCode}
     Reason for Denial: ${req.denialReason}
-    Supporting Evidence: ${req.clinicalEvidence}
+    Supporting Clinical Evidence: ${req.clinicalEvidence}
     
-    The letter should be formal, persuasive, and use standard clinical terminology.
+    Instructions:
+    - Use professional medical tone.
+    - Cite the clinical evidence specifically.
+    - If it's a 'Medical Necessity' appeal, focus on why the service is the standard of care.
+    - If it's 'Experimental', cite potential clinical trial evidence or FDA status.
+    - Use standard HIPAA-compliant letter formatting.
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
-      systemInstruction: "You are a medical billing advocate and clinical specialist. Write persuasive, evidence-based appeal letters that cite specific clinical necessity and challenge insurance denials based on the provided documentation."
+      systemInstruction: "You are a senior medical billing advocate and physician advisor. Your letters are highly professional, evidence-based, and designed to overturn insurance denials."
     }
   });
 
