@@ -1,0 +1,7 @@
+{
+  "name": "Copy of MedAuth AI - Prior Authorization & Appeals Suite",
+  "description": "A sophisticated tool for medical offices to analyze insurance guidelines, predict authorization success, and generate professional appeal letters to reduce claim denials.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
