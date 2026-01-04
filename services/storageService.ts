@@ -33,8 +33,8 @@ export const storage = {
         });
         if (response.ok) {
           const data = await response.json();
-          // Local storage often stores a single object/array, Supabase returns array.
-          // This logic simplifies to match the existing app's expectations.
+          // Local storage often stores an array, Supabase returns array.
+          // If we are looking for a specific key that isn't a table, this might need adjustment.
           return data.length > 0 ? data : defaultValue;
         }
       } catch (e) {
@@ -54,8 +54,10 @@ export const storage = {
     if (config?.enabled && config.supabaseUrl && config.supabaseKey) {
       try {
         const table = key.replace('medauth_', '');
-        // For simplicity in this suite, we perform a "Upsert" style bulk replace
-        // In a complex app, we would do granular record updates
+        
+        // Supabase REST API (PostgREST) expects an array of objects for bulk upsert
+        const payload = Array.isArray(value) ? value : [value];
+        
         await fetch(`${config.supabaseUrl}/rest/v1/${table}`, {
           method: 'POST',
           headers: {
@@ -64,7 +66,7 @@ export const storage = {
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates'
           },
-          body: JSON.stringify(value)
+          body: JSON.stringify(payload)
         });
       } catch (e) {
         console.error("Cloud Sync Failed", e);
@@ -77,7 +79,7 @@ export const storage = {
       const response = await fetch(`${url}/rest/v1/`, {
         headers: { 'apikey': key }
       });
-      return response.status !== 404; // Supabase returns 200 or 401/400 if active
+      return response.status !== 404;
     } catch {
       return false;
     }

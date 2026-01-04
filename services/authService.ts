@@ -1,11 +1,11 @@
 
 import { User, UserRole } from "../types.ts";
+import { storage } from "./storageService.ts";
 
 const USERS_KEY = 'medauth_user_registry';
 const SESSION_KEY = 'medauth_session';
 const BAA_KEY = 'medauth_baa_agreement';
 
-// Pre-seeded accounts for the first run - Only the root administrator is kept.
 const DEFAULT_USERS: User[] = [
   {
     id: 'usr_admin',
@@ -18,41 +18,13 @@ const DEFAULT_USERS: User[] = [
   }
 ];
 
-export const getUsers = (): User[] => {
-  const stored = localStorage.getItem(USERS_KEY);
-  if (!stored) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
-    return DEFAULT_USERS;
-  }
-  
-  let users: User[] = JSON.parse(stored);
-  let needsUpdate = false;
-
-  // Cleanup: Remove the mock user 'Dr. Bashir' if she still exists in the local registry
-  const clinicalIndex = users.findIndex(u => u.id === 'usr_clinical');
-  if (clinicalIndex !== -1) {
-    users = users.filter(u => u.id !== 'usr_clinical');
-    needsUpdate = true;
-  }
-
-  // Migration: Ensure the default admin password is corrected if it was seeded with the old 'password123'
-  const adminIndex = users.findIndex(u => u.id === 'usr_admin' && u.password === 'password123');
-  if (adminIndex !== -1) {
-    users[adminIndex].password = 'admin123';
-    needsUpdate = true;
-  }
-
-  if (needsUpdate) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }
-
-  return users;
+export const getUsers = async (): Promise<User[]> => {
+  return await storage.get<User[]>(USERS_KEY, DEFAULT_USERS);
 };
 
-export const addUser = (user: Omit<User, 'id' | 'createdAt'>): User => {
-  const users = getUsers();
+export const addUser = async (user: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
+  const users = await getUsers();
   
-  // Check for existing username
   if (users.some(u => u.username.toLowerCase() === user.username.toLowerCase())) {
     throw new Error("Username already exists in the registry.");
   }
@@ -63,13 +35,13 @@ export const addUser = (user: Omit<User, 'id' | 'createdAt'>): User => {
     createdAt: new Date().toISOString()
   };
   users.push(newUser);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  await storage.set(USERS_KEY, users);
   return newUser;
 };
 
-export const deleteUser = (id: string) => {
-  const users = getUsers().filter(u => u.id !== id);
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+export const deleteUser = async (id: string) => {
+  const users = (await getUsers()).filter(u => u.id !== id);
+  await storage.set(USERS_KEY, users);
   
   const current = getCurrentUser();
   if (current?.id === id) {
@@ -81,17 +53,15 @@ export const getCurrentUser = (): User | null => {
   const session = localStorage.getItem(SESSION_KEY);
   if (!session) return null;
   const user = JSON.parse(session);
-  // Remove password from memory session for security
   delete user.password;
   return user;
 };
 
-export const authenticate = (username: string, password: string): User | null => {
-  const users = getUsers();
+export const authenticate = async (username: string, password: string): Promise<User | null> => {
+  const users = await getUsers();
   const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
   
   if (user) {
-    // Session storage doesn't need the password
     const sessionUser = { ...user };
     delete sessionUser.password;
     localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));

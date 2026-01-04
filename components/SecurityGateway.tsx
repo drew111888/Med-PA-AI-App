@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ShieldAlert, Lock, ExternalLink, Scale, UserCircle, Key, ChevronRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { ShieldAlert, Lock, ExternalLink, Scale, UserCircle, Key, ChevronRight, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { signAgreement, authenticate, isAgreementSigned } from '../services/authService.ts';
 import { User } from '../types.ts';
 
@@ -17,22 +17,24 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    // Artificial delay to simulate secure auth
-    setTimeout(() => {
-      const user = authenticate(username, password);
+    try {
+      const user = await authenticate(username, password);
       if (user) {
         signAgreement();
         onAuthenticated(user);
       } else {
         setError("Invalid username or password. Please contact your practice administrator.");
-        setLoading(false);
       }
-    }, 600);
+    } catch (err) {
+      setError("System authentication error. Please check your connection.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -133,7 +135,7 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
                 type="submit"
                 className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 flex items-center justify-center gap-3 disabled:opacity-50"
               >
-                {loading ? "Verifying Credentials..." : "Sign into Workstation"} 
+                {loading ? <Loader2 className="animate-spin" size={18} /> : "Sign into Workstation"} 
                 {!loading && <Lock size={18} />}
               </button>
 

@@ -1,7 +1,7 @@
 
-import React, { useMemo } from 'react';
-import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi } from 'lucide-react';
-import { View } from '../types.ts';
+import React, { useState, useEffect } from 'react';
+import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, Loader2 } from 'lucide-react';
+import { View, CaseRecord } from '../types.ts';
 import { getCaseHistory, getDashboardStats } from '../services/historyService.ts';
 
 interface DashboardProps {
@@ -9,14 +9,37 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const liveStats = useMemo(() => getDashboardStats(), []);
-  const recentHistory = useMemo(() => getCaseHistory().slice(0, 5), []);
+  const [loading, setLoading] = useState(true);
+  const [statsData, setStatsData] = useState({
+    totalAnalyzed: 0,
+    appealsGenerated: 0,
+    riskFlags: 0,
+    approvalRate: '0%'
+  });
+  const [recentHistory, setRecentHistory] = useState<CaseRecord[]>([]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const stats = await getDashboardStats();
+        const history = await getCaseHistory();
+        setStatsData(stats);
+        setRecentHistory(history.slice(0, 5));
+      } catch (e) {
+        console.error("Dashboard load failed", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
 
   const stats = [
-    { label: 'Total Analyzed', value: liveStats.totalAnalyzed.toString(), icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Risk Flags Found', value: liveStats.riskFlags.toString(), icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'Appeals Generated', value: liveStats.appealsGenerated.toString(), icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { label: 'Approval Rate', value: liveStats.approvalRate, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Total Analyzed', value: statsData.totalAnalyzed.toString(), icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Risk Flags Found', value: statsData.riskFlags.toString(), icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Appeals Generated', value: statsData.appealsGenerated.toString(), icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { label: 'Approval Rate', value: statsData.approvalRate, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
   const getTimeAgo = (timestamp: string) => {
@@ -41,7 +64,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Wifi size={12} /> Server: Secure
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 text-[10px] font-bold uppercase tracking-widest">
-            <Database size={12} /> AES-256 Encrypted
+            <Database size={12} /> Cloud Sync Active
           </div>
         </div>
       </div>
@@ -51,7 +74,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-start justify-between">
             <div>
               <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
-              <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
+              <p className="text-2xl font-bold text-slate-900">{loading ? '...' : stat.value}</p>
             </div>
             <div className={`p-2 rounded-xl ${stat.bg} ${stat.color}`}>
               <stat.icon size={24} />
@@ -72,7 +95,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             </button>
           </div>
           <div className="space-y-4">
-            {recentHistory.length > 0 ? recentHistory.map((item, i) => (
+            {loading ? (
+              <div className="py-12 flex flex-col items-center justify-center text-slate-400">
+                <Loader2 className="animate-spin mb-2" />
+                <p className="text-xs">Fetching latest records...</p>
+              </div>
+            ) : recentHistory.length > 0 ? recentHistory.map((item, i) => (
               <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-slate-50 hover:bg-slate-50 transition-colors">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-semibold uppercase">

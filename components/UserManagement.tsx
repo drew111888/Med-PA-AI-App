@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, Shield, UserCircle, Mail, Calendar, X, Plus, Key, Lock, Fingerprint, AlertCircle } from 'lucide-react';
+import { UserPlus, Trash2, Shield, UserCircle, Mail, Calendar, X, Plus, Key, Lock, Fingerprint, AlertCircle, Loader2 } from 'lucide-react';
 import { User, UserRole } from '../types.ts';
 import { getUsers, addUser, deleteUser } from '../services/authService.ts';
 import { logAction } from '../services/auditService.ts';
@@ -8,6 +8,7 @@ import { getCurrentUser } from '../services/authService.ts';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -21,11 +22,23 @@ const UserManagement: React.FC = () => {
 
   const currentUser = getCurrentUser();
 
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await getUsers();
+      setUsers(data);
+    } catch (e) {
+      console.error("User fetch failed", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    setUsers(getUsers());
+    loadUsers();
   }, []);
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -35,8 +48,8 @@ const UserManagement: React.FC = () => {
     }
 
     try {
-      const newUser = addUser(formData);
-      setUsers(getUsers());
+      const newUser = await addUser(formData);
+      await loadUsers();
       setShowAddModal(false);
       setFormData({ name: '', username: '', password: '', email: '', role: 'CLINICAL', npi: '' });
 
@@ -48,26 +61,18 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = (id: string, name: string) => {
+  const handleDeleteUser = async (id: string, name: string) => {
     if (id === currentUser?.id) {
       alert("Self-deletion of active administrator sessions is disabled for security.");
       return;
     }
 
     if (window.confirm(`REVOKE ACCESS: Are you sure you want to permanently remove system access for ${name}?`)) {
-      deleteUser(id);
-      setUsers(getUsers());
+      await deleteUser(id);
+      await loadUsers();
       if (currentUser) {
         logAction(currentUser, `Revoked access: ${name}`, 'USER_MANAGEMENT', `User ID ${id} purged from registry`);
       }
-    }
-  };
-
-  const getRoleLabel = (role: UserRole) => {
-    switch (role) {
-      case 'ADMIN': return 'Practice Administrator';
-      case 'CLINICAL': return 'Clinical Staff';
-      case 'ADMIN_STAFF': return 'Administrative Staff';
     }
   };
 
@@ -94,53 +99,60 @@ const UserManagement: React.FC = () => {
         </button>
       </div>
 
-      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50/50 border-b border-slate-100">
-              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Member</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Clinical Role</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Access Control</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {users.map((user) => (
-              <tr key={user.id} className="hover:bg-slate-50/50 transition-colors group">
-                <td className="px-8 py-5">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 font-black text-lg shadow-sm border border-white">
-                      {user.name.split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900 text-sm">{user.name}</p>
-                      <p className="text-xs text-slate-400 font-medium">{user.email || 'No email provided'}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-8 py-5">
-                  <div className="flex items-center gap-2 text-sm font-mono text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 w-fit">
-                    <Fingerprint size={14} className="text-slate-400" /> {user.username}
-                  </div>
-                </td>
-                <td className="px-8 py-5">
-                  {getRoleBadge(user.role)}
-                  {user.npi && <p className="text-[10px] text-slate-400 mt-2 font-mono">NPI: {user.npi}</p>}
-                </td>
-                <td className="px-8 py-5 text-right">
-                  <button 
-                    onClick={() => handleDeleteUser(user.id, user.name)}
-                    disabled={user.id === currentUser?.id}
-                    className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all disabled:opacity-0"
-                    title="Revoke System Access"
-                  >
-                    <Trash2 size={20} />
-                  </button>
-                </td>
+      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden min-h-[400px]">
+        {loading ? (
+          <div className="py-20 flex flex-col items-center justify-center text-slate-400">
+             <Loader2 className="animate-spin mb-4" size={40} />
+             <p className="font-medium">Syncing user registry...</p>
+          </div>
+        ) : (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-slate-50/50 border-b border-slate-100">
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Member</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Clinical Role</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Access Control</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {users.map((user) => (
+                <tr key={user.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 font-black text-lg shadow-sm border border-white">
+                        {user.name.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-900 text-sm">{user.name}</p>
+                        <p className="text-xs text-slate-400 font-medium">{user.email || 'No email provided'}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-2 text-sm font-mono text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 w-fit">
+                      <Fingerprint size={14} className="text-slate-400" /> {user.username}
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    {getRoleBadge(user.role)}
+                    {user.npi && <p className="text-[10px] text-slate-400 mt-2 font-mono">NPI: {user.npi}</p>}
+                  </td>
+                  <td className="px-8 py-5 text-right">
+                    <button 
+                      onClick={() => handleDeleteUser(user.id, user.name)}
+                      disabled={user.id === currentUser?.id}
+                      className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all disabled:opacity-0"
+                      title="Revoke System Access"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {showAddModal && (
