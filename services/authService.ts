@@ -5,25 +5,15 @@ const USERS_KEY = 'medauth_user_registry';
 const SESSION_KEY = 'medauth_session';
 const BAA_KEY = 'medauth_baa_agreement';
 
-// Pre-seeded accounts for the first run
+// Pre-seeded accounts for the first run - Only the root administrator is kept.
 const DEFAULT_USERS: User[] = [
   {
     id: 'usr_admin',
     username: 'admin',
-    password: 'password123',
+    password: 'admin123',
     name: 'Practice Administrator',
     role: 'ADMIN',
     email: 'admin@practice.com',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'usr_clinical',
-    username: 'drbashir',
-    password: 'password123',
-    name: 'Dr. Julian Bashir',
-    role: 'CLINICAL',
-    npi: '1234567890',
-    email: 'j.bashir@practice.com',
     createdAt: new Date().toISOString()
   }
 ];
@@ -34,14 +24,36 @@ export const getUsers = (): User[] => {
     localStorage.setItem(USERS_KEY, JSON.stringify(DEFAULT_USERS));
     return DEFAULT_USERS;
   }
-  return JSON.parse(stored);
+  
+  let users: User[] = JSON.parse(stored);
+  let needsUpdate = false;
+
+  // Cleanup: Remove the mock user 'Dr. Bashir' if she still exists in the local registry
+  const clinicalIndex = users.findIndex(u => u.id === 'usr_clinical');
+  if (clinicalIndex !== -1) {
+    users = users.filter(u => u.id !== 'usr_clinical');
+    needsUpdate = true;
+  }
+
+  // Migration: Ensure the default admin password is corrected if it was seeded with the old 'password123'
+  const adminIndex = users.findIndex(u => u.id === 'usr_admin' && u.password === 'password123');
+  if (adminIndex !== -1) {
+    users[adminIndex].password = 'admin123';
+    needsUpdate = true;
+  }
+
+  if (needsUpdate) {
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  }
+
+  return users;
 };
 
 export const addUser = (user: Omit<User, 'id' | 'createdAt'>): User => {
   const users = getUsers();
   
   // Check for existing username
-  if (users.some(u => u.username === user.username)) {
+  if (users.some(u => u.username.toLowerCase() === user.username.toLowerCase())) {
     throw new Error("Username already exists in the registry.");
   }
 
