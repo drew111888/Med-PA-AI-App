@@ -26,7 +26,7 @@ export enum View {
   APPEALS = 'APPEALS',
   HISTORY = 'HISTORY',
   LIBRARY = 'LIBRARY',
-  SECURITY = 'SECURITY'
+  USERS = 'USERS'
 }
 
 export interface PolicyHistoryEntry {
@@ -55,15 +55,6 @@ export interface MedicalPolicy {
   digest?: PolicyDigest;
 }
 
-export interface AuthRecord {
-  id: string;
-  date: string;
-  patient: string;
-  cpt: string;
-  status: string;
-  result: string;
-}
-
 export interface RedactionMapping {
   [key: string]: string;
 }
@@ -73,14 +64,18 @@ export interface AuditLog {
   timestamp: string;
   user: string;
   action: string;
-  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT';
+  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT';
   details: string;
   ipAddress: string;
 }
 
+export type UserRole = 'ADMIN' | 'CLINICAL' | 'ADMIN_STAFF';
+
 export interface User {
   id: string;
   name: string;
-  role: 'ADMIN' | 'PROVIDER' | 'BILLER';
+  role: UserRole;
   npi?: string;
+  email?: string;
+  createdAt: string;
 }

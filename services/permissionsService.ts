@@ -1,4 +1,5 @@
-import { User, View } from "../types.ts";
+
+import { User, View, UserRole } from "../types.ts";
 
 export type Permission = 
   | 'view_dashboard'
@@ -6,25 +7,27 @@ export type Permission =
   | 'build_appeals'
   | 'manage_policies'
   | 'view_history'
-  | 'view_audit_logs';
+  | 'view_audit_logs'
+  | 'manage_users';
 
-const ROLE_PERMISSIONS: Record<User['role'], Permission[]> = {
+const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: [
     'view_dashboard',
     'run_clinical_analysis',
     'build_appeals',
     'manage_policies',
     'view_history',
-    'view_audit_logs'
+    'view_audit_logs',
+    'manage_users'
   ],
-  PROVIDER: [
+  CLINICAL: [
     'view_dashboard',
     'run_clinical_analysis',
     'build_appeals',
-    'manage_policies', // Added to allow medical staff/providers to edit guidelines
+    'manage_policies',
     'view_history'
   ],
-  BILLER: [
+  ADMIN_STAFF: [
     'view_dashboard',
     'build_appeals',
     'view_history'
@@ -43,7 +46,8 @@ export const canAccessView = (user: User | null, view: View): boolean => {
     case View.ANALYZER: return hasPermission(user, 'run_clinical_analysis');
     case View.APPEALS: return hasPermission(user, 'build_appeals');
     case View.HISTORY: return hasPermission(user, 'view_history');
-    case View.LIBRARY: return true; // Everyone can view the library
+    case View.LIBRARY: return true;
+    case View.USERS: return hasPermission(user, 'manage_users');
     default: return false;
   }
 };

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar.tsx';
 import Dashboard from './components/Dashboard.tsx';
@@ -5,6 +6,7 @@ import Analyzer from './components/Analyzer.tsx';
 import Appeals from './components/Appeals.tsx';
 import History from './components/History.tsx';
 import PolicyLibrary from './components/PolicyLibrary.tsx';
+import UserManagement from './components/UserManagement.tsx';
 import SecurityGateway from './components/SecurityGateway.tsx';
 import { View, User } from './types.ts';
 import { getCurrentUser, logout as authLogout } from './services/authService.ts';
@@ -44,6 +46,8 @@ const App: React.FC = () => {
         return <History />;
       case View.LIBRARY:
         return <PolicyLibrary />;
+      case View.USERS:
+        return <UserManagement />;
       default:
         return <Dashboard onNavigate={setCurrentView} />;
     }

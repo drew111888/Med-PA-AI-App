@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { ShieldAlert, ShieldCheck, Lock, ExternalLink, Scale, UserCircle, Briefcase, Settings } from 'lucide-react';
-import { signAgreement, login } from '../services/authService.ts';
+
+import React, { useState, useEffect } from 'react';
+import { ShieldAlert, Lock, ExternalLink, Scale, UserCircle, ShieldCheck, ChevronRight, UserCog } from 'lucide-react';
+import { signAgreement, login, getUsers, isAgreementSigned } from '../services/authService.ts';
 import { User } from '../types.ts';
 
 interface SecurityGatewayProps {
@@ -8,21 +9,28 @@ interface SecurityGatewayProps {
 }
 
 const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) => {
-  const [agreed, setAgreed] = useState(false);
-  const [step, setStep] = useState(1);
-  const [selectedRole, setSelectedRole] = useState<User['role']>('PROVIDER');
+  const [agreed, setAgreed] = useState(isAgreementSigned());
+  const [step, setStep] = useState(agreed ? 2 : 1);
+  const [users, setUsers] = useState<User[]>([]);
 
-  const handleComplete = () => {
+  useEffect(() => {
+    setUsers(getUsers());
+  }, []);
+
+  const handleSelectUser = (userId: string) => {
     signAgreement();
-    const user = login(true, selectedRole);
+    const user = login(userId);
     if (user) onAuthenticated(user);
   };
 
-  const roles: { id: User['role'], label: string, icon: any, desc: string }[] = [
-    { id: 'ADMIN', label: 'Administrator', icon: Settings, desc: 'Full system access & policy management' },
-    { id: 'PROVIDER', label: 'Medical Provider', icon: UserCircle, desc: 'Clinical analysis & appeal building' },
-    { id: 'BILLER', label: 'Billing / Admin', icon: Briefcase, desc: 'Appeal drafting & case history access' },
-  ];
+  const getRoleLabel = (role: string) => {
+    switch(role) {
+      case 'ADMIN': return 'Administrator';
+      case 'CLINICAL': return 'Clinical Staff';
+      case 'ADMIN_STAFF': return 'Administrative Staff';
+      default: return role;
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900 flex items-center justify-center p-6 z-[9999]">
@@ -65,41 +73,36 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
                 onClick={() => setStep(2)}
                 className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl disabled:opacity-50 hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
               >
-                Proceed to Role Selection <Lock size={18} />
+                Proceed to Identity Selection <Lock size={18} />
               </button>
             </div>
           ) : (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
               <div>
-                <h3 className="text-lg font-bold text-slate-900 mb-4">Identify your role:</h3>
-                <div className="grid gap-3">
-                  {roles.map((role) => (
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <UserCog className="text-blue-600" size={20} /> Select your profile:
+                </h3>
+                <div className="grid gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  {users.map((user) => (
                     <button
-                      key={role.id}
-                      onClick={() => setSelectedRole(role.id)}
-                      className={`flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${
-                        selectedRole === role.id 
-                        ? 'border-blue-600 bg-blue-50/50 ring-1 ring-blue-600' 
-                        : 'border-slate-200 hover:border-slate-300 bg-white'
-                      }`}
+                      key={user.id}
+                      onClick={() => handleSelectUser(user.id)}
+                      className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
                     >
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${selectedRole === role.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                        <role.icon size={20} />
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          <UserCircle size={24} />
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-900 text-sm">{user.name}</p>
+                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{getRoleLabel(user.role)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-slate-900 text-sm">{role.label}</p>
-                        <p className="text-xs text-slate-500">{role.desc}</p>
-                      </div>
+                      <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
                     </button>
                   ))}
                 </div>
               </div>
-              <button 
-                onClick={handleComplete}
-                className="w-full py-4 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-all shadow-lg"
-              >
-                Enter Secure Workstation
-              </button>
             </div>
           )}
 
