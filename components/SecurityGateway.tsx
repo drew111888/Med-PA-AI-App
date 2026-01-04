@@ -1,14 +1,15 @@
 
 import React, { useState } from 'react';
-import { ShieldAlert, Lock, ExternalLink, Scale, UserCircle, Key, ChevronRight, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ShieldAlert, Lock, ExternalLink, Scale, UserCircle, Key, ChevronRight, AlertCircle, Eye, EyeOff, Loader2, Sparkles, CheckCircle } from 'lucide-react';
 import { signAgreement, authenticate, isAgreementSigned } from '../services/authService.ts';
 import { User } from '../types.ts';
 
 interface SecurityGatewayProps {
   onAuthenticated: (user: User) => void;
+  provisioned?: boolean;
 }
 
-const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) => {
+const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated, provisioned }) => {
   const [agreed, setAgreed] = useState(isAgreementSigned());
   const [step, setStep] = useState(agreed ? 2 : 1);
   const [username, setUsername] = useState('');
@@ -42,6 +43,13 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
       <div className="bg-white max-w-lg w-full rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         <div className="p-10 bg-blue-600 text-white text-center relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-400/20 to-transparent"></div>
+          
+          {provisioned && (
+            <div className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-emerald-500 text-white rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg animate-bounce z-20">
+              <CheckCircle size={12} /> Practice Linked Successfully
+            </div>
+          )}
+
           <div className="w-20 h-20 bg-white/20 rounded-3xl flex items-center justify-center mx-auto mb-6 backdrop-blur-md shadow-inner relative z-10">
             <ShieldAlert size={40} />
           </div>
@@ -150,6 +158,11 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
           )}
 
           <div className="pt-6 border-t border-slate-100 flex flex-col items-center gap-3">
+            {provisioned && (
+              <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest flex items-center gap-1">
+                <Sparkles size={12} /> Workstation Configured via Practice Link
+              </p>
+            )}
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Enterprise Security Active</p>
             <a 
               href="https://ai.google.dev/gemini-api/docs/billing" 

@@ -1,9 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building, Fingerprint, ShieldCheck, Download, Trash2, 
   Save, AlertTriangle, ShieldAlert, CheckCircle, FileJson, Clock,
-  Database, Cloud, CloudOff, RefreshCw, Server, ExternalLink, Code, Info
+  Database, Cloud, CloudOff, RefreshCw, Server, ExternalLink, Code, Info, Link2, Link2Off, UserPlus, Copy, Check
 } from 'lucide-react';
 import { PracticeSettings, CloudConfig } from '../types.ts';
 import { getCurrentUser } from '../services/authService.ts';
@@ -33,7 +33,23 @@ const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
+  const [copiedLink, setCopiedLink] = useState(false);
+  
   const user = getCurrentUser();
+
+  useEffect(() => {
+    const checkConn = async () => {
+      if (settings.cloud?.enabled && settings.cloud.supabaseUrl && settings.cloud.supabaseKey) {
+        setCloudStatus('checking');
+        const ok = await storage.testConnection(settings.cloud.supabaseUrl, settings.cloud.supabaseKey);
+        setCloudStatus(ok ? 'connected' : 'disconnected');
+      } else {
+        setCloudStatus('disconnected');
+      }
+    };
+    checkConn();
+  }, [settings.cloud?.enabled, settings.cloud?.supabaseUrl, settings.cloud?.supabaseKey]);
 
   const handleSave = () => {
     setSaving(true);
@@ -50,11 +66,29 @@ const Settings: React.FC = () => {
     }, 800);
   };
 
+  const generateInviteLink = () => {
+    const configData = {
+      u: settings.cloud?.supabaseUrl,
+      k: settings.cloud?.supabaseKey,
+      p: settings.practiceName
+    };
+    const encoded = btoa(JSON.stringify(configData));
+    const url = `${window.location.origin}${window.location.pathname}?setup=${encoded}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+    
+    if (user) {
+      logAction(user, 'Staff invite link generated', 'USER_MANAGEMENT', 'Encrypted setup URL created for team provisioning');
+    }
+  };
+
   const testCloud = async () => {
     if (!settings.cloud?.supabaseUrl || !settings.cloud?.supabaseKey) return;
     setTesting(true);
     const ok = await storage.testConnection(settings.cloud.supabaseUrl, settings.cloud.supabaseKey);
     setTesting(false);
+    setCloudStatus(ok ? 'connected' : 'disconnected');
     alert(ok ? "Connected to Cloud Database successfully!" : "Connection failed. Check URL and Key.");
   };
 
@@ -66,8 +100,6 @@ const Settings: React.FC = () => {
     a.href = url;
     a.download = `MedAuth_Audit_Logs_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
-    
-    if (user) logAction(user, 'Audit logs exported', 'POLICY_EXPORT', 'Full system audit trail downloaded');
   };
 
   const sqlSchema = `
@@ -81,9 +113,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action T
   return (
     <div className="space-y-8 pb-20">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">System Configuration</h2>
-          <p className="text-slate-500">Practice-level defaults and production environment management.</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">System Configuration</h2>
+            <p className="text-slate-500">Practice-level defaults and production environment management.</p>
+          </div>
+          <div className={`px-3 py-1 rounded-full flex items-center gap-2 border text-[10px] font-black uppercase tracking-widest ${
+            cloudStatus === 'connected' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 
+            cloudStatus === 'checking' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-slate-100 border-slate-200 text-slate-400'
+          }`}>
+            {cloudStatus === 'connected' ? <Link2 size={12} /> : <Link2Off size={12} />}
+            {cloudStatus === 'connected' ? 'Cloud Linked' : cloudStatus === 'checking' ? 'Verifying...' : 'Local Mode'}
+          </div>
         </div>
         <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200/50">
           <button onClick={() => setActiveTab('practice')} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${activeTab === 'practice' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>General</button>
@@ -131,18 +172,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action T
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.enforceSecureMode ? 'left-7' : 'left-1'}`} />
                   </button>
                 </div>
-
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">Session Timeout</p>
-                    <p className="text-xs text-slate-500 mt-0.5">Inactivity duration before requiring a fresh BAA sign-off.</p>
-                  </div>
-                  <select value={settings.autoLogoutMinutes} onChange={e => setSettings({...settings, autoLogoutMinutes: parseInt(e.target.value)})} className="bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700">
-                    <option value={15}>15 Minutes</option>
-                    <option value={30}>30 Minutes</option>
-                    <option value={60}>1 Hour</option>
-                  </select>
-                </div>
               </div>
             </section>
           )}
@@ -153,18 +182,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action T
                 <div className="flex items-center gap-2 text-slate-900 font-bold">
                   <Server className="text-indigo-600" size={20} /> Production Database Sync
                 </div>
-                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${settings.cloud?.enabled ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {settings.cloud?.enabled ? 'Cloud Enabled' : 'Local Only'}
-                </div>
               </div>
 
-              <div className="p-6 bg-indigo-50 rounded-2xl border border-indigo-100 flex gap-4">
-                 <Cloud className="text-indigo-600 flex-shrink-0" size={24} />
-                 <div className="text-sm text-indigo-900">
-                   <p className="font-bold mb-1">Scale to Production</p>
-                   <p className="text-xs leading-relaxed opacity-80">Connect your MedAuth AI suite to a Supabase project to enable multi-user sync and permanent data persistence.</p>
-                 </div>
-              </div>
+              {settings.cloud?.enabled && cloudStatus === 'connected' && (
+                <div className="p-6 bg-blue-600 rounded-2xl text-white shadow-xl shadow-blue-600/20 flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div>
+                    <h4 className="font-bold text-lg flex items-center gap-2">
+                      <UserPlus size={20} /> Provision Your Team
+                    </h4>
+                    <p className="text-blue-100 text-sm mt-1">Generate a setup link to flow these cloud credentials down to new staff members automatically.</p>
+                  </div>
+                  <button 
+                    onClick={generateInviteLink} 
+                    className="whitespace-nowrap px-6 py-3 bg-white text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition-all flex items-center gap-2 shadow-lg"
+                  >
+                    {copiedLink ? <Check size={18} /> : <Copy size={18} />}
+                    {copiedLink ? 'Link Copied!' : 'Copy Setup Link'}
+                  </button>
+                </div>
+              )}
 
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -254,14 +290,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action T
             </h4>
             <p className="text-xs text-slate-500 mb-6">Export the full activity log of all clinical analyses, appeal generations, and user modifications.</p>
             <button onClick={handleExportAudit} className="w-full py-3 border-2 border-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2"><Download size={18} /> Download Audit Trail</button>
-          </div>
-
-          <div className="p-8 bg-rose-50 rounded-3xl border border-rose-100">
-            <h4 className="text-sm font-bold text-rose-900 mb-2 flex items-center gap-2">
-              <AlertTriangle size={18} /> Maintenance
-            </h4>
-            <p className="text-xs text-rose-700 mb-4">Clear all locally cached clinical drafts and practice history. This action cannot be undone.</p>
-            <button onClick={() => { if(window.confirm('WIPE ALL DATA? This will clear all local drafts and history.')) { localStorage.clear(); window.location.reload(); } }} className="w-full py-2.5 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-all text-sm flex items-center justify-center gap-2 shadow-md shadow-rose-600/10"><Trash2 size={16} /> Reset Practice Data</button>
           </div>
         </div>
       </div>
