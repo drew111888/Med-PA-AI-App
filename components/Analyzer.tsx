@@ -46,13 +46,18 @@ const Analyzer: React.FC = () => {
     }
   }, [cptCode, notes]);
 
+  // Fix: Handle the async searchPolicies call within useEffect properly
   useEffect(() => {
-    if (libSearch.length > 1) {
-      setSuggestedPolicies(searchPolicies(libSearch));
-      setShowLibDropdown(true);
-    } else {
-      setShowLibDropdown(false);
-    }
+    const handleSearch = async () => {
+      if (libSearch.length > 1) {
+        const results = await searchPolicies(libSearch);
+        setSuggestedPolicies(results);
+        setShowLibDropdown(true);
+      } else {
+        setShowLibDropdown(false);
+      }
+    };
+    handleSearch();
   }, [libSearch]);
 
   useEffect(() => {

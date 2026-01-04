@@ -17,7 +17,7 @@ export interface AppealLetterRequest {
   denialReason: string;
   clinicalEvidence: string;
   cptCode: string;
-  serviceName: string; // Added to support drugs/tests
+  serviceName: string;
   templateType: AppealType;
 }
 
@@ -86,12 +86,19 @@ export type UserRole = 'ADMIN' | 'CLINICAL' | 'ADMIN_STAFF';
 export interface User {
   id: string;
   username: string;
-  password?: string; // Only stored in local registry
+  password?: string;
   name: string;
   role: UserRole;
   npi?: string;
   email?: string;
   createdAt: string;
+}
+
+export interface CloudConfig {
+  enabled: boolean;
+  supabaseUrl: string;
+  supabaseKey: string;
+  lastSync?: string;
 }
 
 export interface PracticeSettings {
@@ -100,4 +107,5 @@ export interface PracticeSettings {
   taxId: string;
   enforceSecureMode: boolean;
   autoLogoutMinutes: number;
+  cloud?: CloudConfig;
 }
