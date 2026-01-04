@@ -26,7 +26,18 @@ export enum View {
   APPEALS = 'APPEALS',
   HISTORY = 'HISTORY',
   LIBRARY = 'LIBRARY',
-  USERS = 'USERS'
+  USERS = 'USERS',
+  SETTINGS = 'SETTINGS'
+}
+
+export interface CaseRecord {
+  id: string;
+  timestamp: string;
+  patientName: string;
+  cptCode: string;
+  type: 'Analysis' | 'Appeal';
+  status: string;
+  details?: any;
 }
 
 export interface PolicyHistoryEntry {
@@ -64,7 +75,7 @@ export interface AuditLog {
   timestamp: string;
   user: string;
   action: string;
-  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT';
+  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT' | 'SYSTEM_SETTINGS';
   details: string;
   ipAddress: string;
 }
@@ -78,4 +89,12 @@ export interface User {
   npi?: string;
   email?: string;
   createdAt: string;
+}
+
+export interface PracticeSettings {
+  practiceName: string;
+  npi: string;
+  taxId: string;
+  enforceSecureMode: boolean;
+  autoLogoutMinutes: number;
 }

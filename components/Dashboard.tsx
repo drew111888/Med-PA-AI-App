@@ -1,18 +1,33 @@
-import React from 'react';
+
+import React, { useMemo } from 'react';
 import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi } from 'lucide-react';
 import { View } from '../types.ts';
+import { getCaseHistory, getDashboardStats } from '../services/historyService.ts';
 
 interface DashboardProps {
   onNavigate: (view: View) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+  const liveStats = useMemo(() => getDashboardStats(), []);
+  const recentHistory = useMemo(() => getCaseHistory().slice(0, 5), []);
+
   const stats = [
-    { label: 'Total Analyzed', value: '124', icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Risk Flags Found', value: '18', icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'Appeals Generated', value: '42', icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { label: 'Approval Rate', value: '94%', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Total Analyzed', value: liveStats.totalAnalyzed.toString(), icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Risk Flags Found', value: liveStats.riskFlags.toString(), icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Appeals Generated', value: liveStats.appealsGenerated.toString(), icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { label: 'Approval Rate', value: liveStats.approvalRate, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
+
+  const getTimeAgo = (timestamp: string) => {
+    const diff = Date.now() - new Date(timestamp).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return new Date(timestamp).toLocaleDateString();
+  };
 
   return (
     <div className="space-y-8">
@@ -49,36 +64,47 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-slate-900">Compliance Audit History</h3>
-            <button className="text-blue-600 text-sm font-medium hover:underline flex items-center gap-1">
-              View Audit Logs <ArrowUpRight size={14} />
+            <button 
+              onClick={() => onNavigate(View.HISTORY)}
+              className="text-blue-600 text-sm font-medium hover:underline flex items-center gap-1"
+            >
+              View Full History <ArrowUpRight size={14} />
             </button>
           </div>
           <div className="space-y-4">
-            {[
-              { patient: 'Sarah Jenkins', type: 'MRI Lumbar Spine', status: 'Likely Denied', date: '2h ago' },
-              { patient: 'Michael Chen', type: 'Cardiac Ablation', status: 'Approved', date: '5h ago' },
-              { patient: 'Robert Taylor', type: 'Tympanostomy', status: 'Likely Approved', date: '1d ago' },
-            ].map((item, i) => (
+            {recentHistory.length > 0 ? recentHistory.map((item, i) => (
               <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-slate-50 hover:bg-slate-50 transition-colors">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-semibold">
-                    {item.patient[0]}
+                  <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-semibold uppercase">
+                    {item.patientName[0] || '?'}
                   </div>
                   <div>
-                    <p className="font-medium text-slate-900">{item.patient}</p>
-                    <p className="text-sm text-slate-500">{item.type}</p>
+                    <p className="font-medium text-slate-900">{item.patientName || 'Anonymous Case'}</p>
+                    <p className="text-sm text-slate-500">{item.type}: {item.cptCode}</p>
                   </div>
                 </div>
                 <div className="text-right">
                   <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                    item.status === 'Likely Denied' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                    item.status.includes('Denied') || item.status === 'Likely Denied' ? 'bg-red-50 text-red-600' : 
+                    item.status.includes('Approved') ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600'
                   }`}>
                     {item.status}
                   </span>
-                  <p className="text-xs text-slate-400 mt-1">{item.date}</p>
+                  <p className="text-xs text-slate-400 mt-1">{getTimeAgo(item.timestamp)}</p>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="py-12 text-center text-slate-400">
+                <FileText className="mx-auto mb-3 opacity-20" size={48} />
+                <p>No activity recorded yet.</p>
+                <button 
+                  onClick={() => onNavigate(View.ANALYZER)}
+                  className="mt-4 text-sm font-bold text-blue-600 hover:underline"
+                >
+                  Start your first analysis
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -100,7 +126,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               Start Secure Analysis
             </button>
             <p className="text-[10px] text-center text-slate-500 uppercase font-bold tracking-widest">
-              NPI: 1234567890 • BAA Active
+              Practice Data Protection Enabled • BAA Active
             </p>
           </div>
         </div>

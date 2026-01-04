@@ -8,7 +8,8 @@ export type Permission =
   | 'manage_policies'
   | 'view_history'
   | 'view_audit_logs'
-  | 'manage_users';
+  | 'manage_users'
+  | 'manage_settings';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: [
@@ -18,7 +19,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'manage_policies',
     'view_history',
     'view_audit_logs',
-    'manage_users'
+    'manage_users',
+    'manage_settings'
   ],
   CLINICAL: [
     'view_dashboard',
@@ -48,6 +50,7 @@ export const canAccessView = (user: User | null, view: View): boolean => {
     case View.HISTORY: return hasPermission(user, 'view_history');
     case View.LIBRARY: return true;
     case View.USERS: return hasPermission(user, 'manage_users');
+    case View.SETTINGS: return hasPermission(user, 'manage_settings');
     default: return false;
   }
 };

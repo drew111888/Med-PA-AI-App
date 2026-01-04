@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import { generateAppealLetter } from '../services/geminiService.ts';
 import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
+import { saveCaseRecord } from '../services/historyService.ts';
 import { AppealLetterRequest, AppealType } from '../types.ts';
 
 const STORAGE_KEY = 'medauth_appeal_draft';
@@ -52,6 +53,15 @@ const Appeals: React.FC = () => {
     try {
       const generatedLetter = await generateAppealLetter(formData, secureMode);
       setLetter(generatedLetter);
+
+      // Save to case history
+      saveCaseRecord({
+        patientName: formData.patientName,
+        cptCode: formData.cptCode || 'N/A',
+        type: 'Appeal',
+        status: 'Generated'
+      });
+
     } catch (error) {
       console.error(error);
       alert("Failed to generate appeal letter.");
