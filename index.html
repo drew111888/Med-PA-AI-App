@@ -7,9 +7,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <!-- Shim to support process.env in browser-native environments -->
+    <!-- Basic shim for process.env if not provided by the environment -->
     <script>
-      window.process = { env: { API_KEY: "" } };
+      if (typeof window !== 'undefined' && !window.process) {
+        window.process = { env: {} };
+      }
     </script>
 <script type="importmap">
 {
