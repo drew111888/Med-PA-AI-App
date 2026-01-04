@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
-import { Send, Copy, Check, FileText, Loader2, RefreshCw, Trash2, Save, Download, Lock, Unlock, Sparkles, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, Copy, Check, FileText, Loader2, RefreshCw, Trash2, Save, Download, Lock, Unlock, Sparkles, ChevronDown, FileUp, AlertCircle, Pill, Activity } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { generateAppealLetter } from '../services/geminiService.ts';
+import { generateAppealLetter, parseDenialLetter, extractClinicalEvidenceForRebuttal } from '../services/geminiService.ts';
 import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
 import { saveCaseRecord } from '../services/historyService.ts';
@@ -21,14 +21,20 @@ const Appeals: React.FC = () => {
       denialReason: '',
       clinicalEvidence: '',
       cptCode: '',
+      serviceName: '',
       templateType: 'Medical Necessity'
     };
   });
 
   const [loading, setLoading] = useState(false);
+  const [parsingDenial, setParsingDenial] = useState(false);
+  const [parsingClinical, setParsingClinical] = useState(false);
   const [letter, setLetter] = useState(() => localStorage.getItem(LETTER_STORAGE_KEY) || '');
   const [copied, setCopied] = useState(false);
   const [secureMode, setSecureMode] = useState(true);
+
+  const denialInputRef = useRef<HTMLInputElement>(null);
+  const clinicalInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
@@ -37,6 +43,75 @@ const Appeals: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(LETTER_STORAGE_KEY, letter);
   }, [letter]);
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const handleDenialUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setParsingDenial(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const data = await parseDenialLetter(base64, file.type || 'application/pdf');
+      
+      setFormData(prev => ({
+        ...prev,
+        patientName: data.patientName || prev.patientName,
+        insuranceProvider: data.insuranceProvider || prev.insuranceProvider,
+        policyNumber: data.policyNumber || prev.policyNumber,
+        cptCode: data.cptCode || prev.cptCode,
+        serviceName: data.serviceName || prev.serviceName,
+        denialReason: data.denialReason || prev.denialReason,
+      }));
+
+      const user = getCurrentUser();
+      if (user) logAction(user, `Denial PDF parsed: ${file.name}`, 'APPEAL', 'Case details auto-populated from PDF');
+    } catch (error) {
+      console.error(error);
+      alert("Failed to parse denial letter. Please ensure it is a clear document.");
+    } finally {
+      setParsingDenial(false);
+      if (denialInputRef.current) denialInputRef.current.value = '';
+    }
+  };
+
+  const handleClinicalUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!formData.denialReason) {
+      alert("Please enter or import the denial reason first so the AI knows what to look for in the clinical records.");
+      return;
+    }
+
+    setParsingClinical(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const evidence = await extractClinicalEvidenceForRebuttal(base64, file.type || 'application/pdf', formData.denialReason);
+      
+      setFormData(prev => ({
+        ...prev,
+        clinicalEvidence: evidence || prev.clinicalEvidence
+      }));
+
+      const user = getCurrentUser();
+      if (user) logAction(user, `Clinical records parsed for rebuttal: ${file.name}`, 'APPEAL', 'Clinical evidence extracted from medical records');
+    } catch (error) {
+      console.error(error);
+      alert("Failed to extract evidence from clinical records.");
+    } finally {
+      setParsingClinical(false);
+      if (clinicalInputRef.current) clinicalInputRef.current.value = '';
+    }
+  };
 
   const handleGenerate = async () => {
     if (!formData.patientName || !formData.denialReason) {
@@ -106,6 +181,7 @@ const Appeals: React.FC = () => {
         denialReason: '',
         clinicalEvidence: '',
         cptCode: '',
+        serviceName: '',
         templateType: 'Medical Necessity'
       });
       setLetter('');
@@ -137,28 +213,67 @@ const Appeals: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 space-y-6">
           <div className="space-y-4">
-             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Appeal Type / Template</label>
-              <div className="relative">
-                <select 
-                  value={formData.templateType}
-                  onChange={e => setFormData({...formData, templateType: e.target.value as AppealType})}
-                  className="w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-slate-700"
+             <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Appeal Type / Template</label>
+              <div className="flex gap-2">
+                <input type="file" ref={denialInputRef} onChange={handleDenialUpload} className="hidden" accept=".pdf,.png,.jpg,.jpeg" />
+                <button 
+                  onClick={() => denialInputRef.current?.click()}
+                  disabled={parsingDenial}
+                  className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-black px-2 py-1 rounded-md flex items-center gap-1.5 transition-all"
                 >
-                  {appealTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                  {parsingDenial ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
+                  IMPORT DENIAL PDF
+                </button>
               </div>
+             </div>
+
+            <div className="relative">
+              <select 
+                value={formData.templateType}
+                onChange={e => setFormData({...formData, templateType: e.target.value as AppealType})}
+                className="w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm appearance-none outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-slate-700"
+              >
+                {appealTypes.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Patient Name</label>
-                <input type="text" value={formData.patientName} onChange={e => setFormData({...formData, patientName: e.target.value})} placeholder="Jane Doe" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={formData.patientName} onChange={e => setFormData({...formData, patientName: e.target.value})} placeholder="Jane Doe" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Carrier Name</label>
-                <input type="text" value={formData.insuranceProvider} onChange={e => setFormData({...formData, insuranceProvider: e.target.value})} placeholder="e.g. Aetna" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                <input type="text" value={formData.insuranceProvider} onChange={e => setFormData({...formData, insuranceProvider: e.target.value})} placeholder="e.g. Aetna" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Policy / Member ID</label>
+                <input type="text" value={formData.policyNumber} onChange={e => setFormData({...formData, policyNumber: e.target.value})} placeholder="ID-12345" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">CPT Code (Optional)</label>
+                <input type="text" value={formData.cptCode} onChange={e => setFormData({...formData, cptCode: e.target.value})} placeholder="e.g. 72148" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                 Service / Medication / Test Name
+              </label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={formData.serviceName} 
+                  onChange={e => setFormData({...formData, serviceName: e.target.value})} 
+                  placeholder="e.g. Ocrevus, Lumbar MRI, Wegovy" 
+                  className="w-full pl-10 pr-4 py-2 bg-blue-50/50 border border-blue-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-blue-900" 
+                />
+                <Activity size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400" />
               </div>
             </div>
 
@@ -170,9 +285,17 @@ const Appeals: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Clinical Evidence</label>
-                <button className="text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline">
-                  <Sparkles size={10} /> Extract from Analyzer
-                </button>
+                <div className="flex gap-2">
+                  <input type="file" ref={clinicalInputRef} onChange={handleClinicalUpload} className="hidden" accept=".pdf,.png,.jpg,.jpeg" />
+                  <button 
+                    onClick={() => clinicalInputRef.current?.click()}
+                    disabled={parsingClinical}
+                    className="text-[10px] text-indigo-600 font-black flex items-center gap-1.5 hover:underline"
+                  >
+                    {parsingClinical ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                    IMPORT RECORDS FOR REBUTTAL
+                  </button>
+                </div>
               </div>
               <textarea rows={5} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Clinical rationale to refute the denial..." className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" />
             </div>

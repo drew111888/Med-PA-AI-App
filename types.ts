@@ -17,6 +17,7 @@ export interface AppealLetterRequest {
   denialReason: string;
   clinicalEvidence: string;
   cptCode: string;
+  serviceName: string; // Added to support drugs/tests
   templateType: AppealType;
 }
 

@@ -94,6 +94,74 @@ export const generatePolicyDigest = async (policyContent: string): Promise<Polic
 };
 
 /**
+ * Extracts case details from a denial letter PDF.
+ */
+export const parseDenialLetter = async (base64Data: string, mimeType: string): Promise<Partial<AppealLetterRequest>> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: base64Data
+        }
+      },
+      {
+        text: "Extract the case details from this insurance denial letter for an appeal: Patient Name, Insurance Carrier, Policy/Member ID, CPT/HCPCS Code, Medication/Service/Test Name, and the exact Reason for Denial."
+      }
+    ],
+    config: {
+      systemInstruction: "You are a medical billing specialist. Extract structured case data from denial letters. If a CPT code is missing, ensure you extract the name of the drug, test, or procedure denied. Return valid JSON.",
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          patientName: { type: Type.STRING },
+          insuranceProvider: { type: Type.STRING },
+          policyNumber: { type: Type.STRING },
+          cptCode: { type: Type.STRING },
+          serviceName: { type: Type.STRING, description: "The medication name, test name, or procedure description denied." },
+          denialReason: { type: Type.STRING }
+        }
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+/**
+ * Scans medical records to find evidence specifically relevant to a denial reason.
+ */
+export const extractClinicalEvidenceForRebuttal = async (
+  base64Data: string, 
+  mimeType: string, 
+  denialReason: string
+): Promise<string> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: [
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: base64Data
+        }
+      },
+      {
+        text: `The insurance company denied coverage for the following reason: "${denialReason}". 
+               Scan these clinical records and extract ONLY the clinical evidence (findings, history, failed treatments, imaging) that specifically refutes or addresses this denial reason. 
+               Summarize the rebuttal points concisely.`
+      }
+    ],
+    config: {
+      systemInstruction: "You are a physician advisor. Extract evidence from clinical documents to overturn a specific insurance denial. Focus only on relevant clinical facts."
+    }
+  });
+
+  return response.text || "";
+};
+
+/**
  * Generates a formal medical appeal letter using Gemini 3 Flash.
  */
 export const generateAppealLetter = async (request: AppealLetterRequest, useSecureMode: boolean = false): Promise<string> => {
@@ -123,7 +191,8 @@ export const generateAppealLetter = async (request: AppealLetterRequest, useSecu
     Patient: ${req.patientName}
     Policy: ${req.policyNumber}
     Insurance: ${req.insuranceProvider}
-    CPT: ${req.cptCode}
+    Denied Service/Medication: ${req.serviceName || 'N/A'}
+    CPT: ${req.cptCode || 'Not provided'}
     Reason for Denial: ${req.denialReason}
     Supporting Clinical Evidence: ${req.clinicalEvidence}
     
