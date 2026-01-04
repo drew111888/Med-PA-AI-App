@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action T
                       <div className="group relative">
                         <Info size={12} className="text-slate-400 cursor-help" />
                         <div className="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 text-white text-[10px] p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                          Use the "anon public" key found in Project Settings > API.
+                          Use the "anon public" key found in Project Settings &gt; API.
                         </div>
                       </div>
                     </div>
