@@ -5,9 +5,12 @@ const USERS_KEY = 'medauth_user_registry';
 const SESSION_KEY = 'medauth_session';
 const BAA_KEY = 'medauth_baa_agreement';
 
+// Pre-seeded accounts for the first run
 const DEFAULT_USERS: User[] = [
   {
     id: 'usr_admin',
+    username: 'admin',
+    password: 'password123',
     name: 'Practice Administrator',
     role: 'ADMIN',
     email: 'admin@practice.com',
@@ -15,6 +18,8 @@ const DEFAULT_USERS: User[] = [
   },
   {
     id: 'usr_clinical',
+    username: 'drbashir',
+    password: 'password123',
     name: 'Dr. Julian Bashir',
     role: 'CLINICAL',
     npi: '1234567890',
@@ -34,6 +39,12 @@ export const getUsers = (): User[] => {
 
 export const addUser = (user: Omit<User, 'id' | 'createdAt'>): User => {
   const users = getUsers();
+  
+  // Check for existing username
+  if (users.some(u => u.username === user.username)) {
+    throw new Error("Username already exists in the registry.");
+  }
+
   const newUser: User = {
     ...user,
     id: `usr_${Math.random().toString(36).substr(2, 9)}`,
@@ -48,7 +59,6 @@ export const deleteUser = (id: string) => {
   const users = getUsers().filter(u => u.id !== id);
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
   
-  // If the current user deletes themselves, log them out
   const current = getCurrentUser();
   if (current?.id === id) {
     logout();
@@ -57,15 +67,23 @@ export const deleteUser = (id: string) => {
 
 export const getCurrentUser = (): User | null => {
   const session = localStorage.getItem(SESSION_KEY);
-  return session ? JSON.parse(session) : null;
+  if (!session) return null;
+  const user = JSON.parse(session);
+  // Remove password from memory session for security
+  delete user.password;
+  return user;
 };
 
-export const login = (userId: string): User | null => {
+export const authenticate = (username: string, password: string): User | null => {
   const users = getUsers();
-  const user = users.find(u => u.id === userId);
+  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
+  
   if (user) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    return user;
+    // Session storage doesn't need the password
+    const sessionUser = { ...user };
+    delete sessionUser.password;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+    return sessionUser;
   }
   return null;
 };

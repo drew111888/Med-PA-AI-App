@@ -84,6 +84,8 @@ export type UserRole = 'ADMIN' | 'CLINICAL' | 'ADMIN_STAFF';
 
 export interface User {
   id: string;
+  username: string;
+  password?: string; // Only stored in local registry
   name: string;
   role: UserRole;
   npi?: string;
