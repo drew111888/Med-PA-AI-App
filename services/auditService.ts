@@ -1,3 +1,4 @@
+
 import { AuditLog, User } from "../types.ts";
 
 /**
@@ -8,7 +9,7 @@ import { AuditLog, User } from "../types.ts";
 export const logAction = async (user: User, action: string, type: AuditLog['resourceType'], details: string) => {
   const logEntry: AuditLog = {
     id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-    user: user.name,
+    actor: user.name, // Changed from 'user' to 'actor'
     action,
     resourceType: type,
     details,

@@ -70,12 +70,13 @@ const Settings: React.FC = () => {
     if (user) logAction(user, 'Audit logs exported', 'POLICY_EXPORT', 'Full system audit trail downloaded');
   };
 
+  // UPDATED: Changed column 'user' to 'actor' to avoid reserved keyword errors in Postgres
   const sqlSchema = `
 -- RUN THIS IN YOUR SUPABASE SQL EDITOR --
 CREATE TABLE IF NOT EXISTS policies (id TEXT PRIMARY KEY, carrier TEXT, title TEXT, content TEXT, lastUpdated TEXT, data JSONB);
 CREATE TABLE IF NOT EXISTS case_history (id TEXT PRIMARY KEY, patientName TEXT, cptCode TEXT, status TEXT, timestamp TEXT, data JSONB);
 CREATE TABLE IF NOT EXISTS user_registry (id TEXT PRIMARY KEY, username TEXT, name TEXT, role TEXT, data JSONB);
-CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, user TEXT, action TEXT, timestamp TEXT, data JSONB);
+CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, actor TEXT, action TEXT, timestamp TEXT, data JSONB);
   `;
 
   return (

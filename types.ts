@@ -74,7 +74,7 @@ export interface RedactionMapping {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  user: string;
+  actor: string; // Renamed from user to actor to avoid SQL reserved word conflicts
   action: string;
   resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT' | 'SYSTEM_SETTINGS';
   details: string;
