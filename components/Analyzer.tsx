@@ -10,7 +10,6 @@ import { searchPolicies } from '../services/policyService.ts';
 import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
 import { hasPermission } from '../services/permissionsService.ts';
-import { saveCaseRecord } from '../services/historyService.ts';
 import { AnalysisResult, MedicalPolicy } from '../types.ts';
 
 const STORAGE_KEY_CPT = 'medauth_analyzer_cpt_draft';
@@ -46,18 +45,13 @@ const Analyzer: React.FC = () => {
     }
   }, [cptCode, notes]);
 
-  // Fix: Handle the async searchPolicies call within useEffect properly
   useEffect(() => {
-    const handleSearch = async () => {
-      if (libSearch.length > 1) {
-        const results = await searchPolicies(libSearch);
-        setSuggestedPolicies(results);
-        setShowLibDropdown(true);
-      } else {
-        setShowLibDropdown(false);
-      }
-    };
-    handleSearch();
+    if (libSearch.length > 1) {
+      setSuggestedPolicies(searchPolicies(libSearch));
+      setShowLibDropdown(true);
+    } else {
+      setShowLibDropdown(false);
+    }
   }, [libSearch]);
 
   useEffect(() => {
@@ -141,16 +135,6 @@ const Analyzer: React.FC = () => {
     try {
       const data = await analyzeGuidelines(cleanGuidelines, notes, cptCode, secureMode);
       setResult(data);
-      
-      // Save to case history
-      saveCaseRecord({
-        patientName: 'Clinical Case', // We de-identify by default
-        cptCode: cptCode,
-        type: 'Analysis',
-        status: data.status,
-        details: { confidence: data.confidenceScore }
-      });
-
     } catch (error) {
       console.error(error);
       alert("Analysis failed. Please check your inputs.");

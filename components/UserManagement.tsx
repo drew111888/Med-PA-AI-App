@@ -1,248 +1,249 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, Shield, UserCircle, Mail, Calendar, X, Plus, Key, Lock, Fingerprint, AlertCircle, Loader2 } from 'lucide-react';
-import { User, UserRole } from '../types.ts';
-import { getUsers, addUser, deleteUser } from '../services/authService.ts';
+import { UserPlus, Trash2, Edit2, Shield, UserCircle, Fingerprint, X, Check, Save } from 'lucide-react';
+import { User } from '../types.ts';
+import { getAllUsers, saveUser, deleteUser, provisionUser } from '../services/userService.ts';
 import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [formData, setFormData] = useState({
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<User>>({});
+  const [newUserForm, setNewUserForm] = useState<Partial<User>>({
     name: '',
     username: '',
-    password: '',
     email: '',
-    role: 'CLINICAL' as UserRole,
-    npi: ''
+    role: 'PROVIDER'
   });
-  const [error, setError] = useState<string | null>(null);
 
   const currentUser = getCurrentUser();
 
-  const loadUsers = async () => {
-    setLoading(true);
-    try {
-      const data = await getUsers();
-      setUsers(data);
-    } catch (e) {
-      console.error("User fetch failed", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadUsers();
+    setUsers(getAllUsers());
   }, []);
 
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!formData.name || !formData.username || !formData.password) {
-      setError("Please fill in all required clinical access fields.");
-      return;
-    }
-
-    try {
-      const newUser = await addUser(formData);
-      await loadUsers();
-      setShowAddModal(false);
-      setFormData({ name: '', username: '', password: '', email: '', role: 'CLINICAL', npi: '' });
-
-      if (currentUser) {
-        logAction(currentUser, `Provisioned new user: ${newUser.name}`, 'USER_MANAGEMENT', `Role: ${newUser.role} | Username: ${newUser.username}`);
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to add user.");
+  const handleProvision = () => {
+    if (newUserForm.name && newUserForm.email) {
+      const user = provisionUser(newUserForm);
+      setUsers(getAllUsers());
+      setIsAdding(false);
+      setNewUserForm({ name: '', username: '', email: '', role: 'PROVIDER' });
+      if (currentUser) logAction(currentUser, `Provisioned new user: ${user.name}`, 'LOGIN', `Role: ${user.role}`);
     }
   };
 
-  const handleDeleteUser = async (id: string, name: string) => {
+  const handleDelete = (id: string, name: string) => {
     if (id === currentUser?.id) {
-      alert("Self-deletion of active administrator sessions is disabled for security.");
+      alert("You cannot delete your own administrative account.");
       return;
     }
-
-    if (window.confirm(`REVOKE ACCESS: Are you sure you want to permanently remove system access for ${name}?`)) {
-      await deleteUser(id);
-      await loadUsers();
-      if (currentUser) {
-        logAction(currentUser, `Revoked access: ${name}`, 'USER_MANAGEMENT', `User ID ${id} purged from registry`);
-      }
+    if (window.confirm(`Are you sure you want to permanently revoke access for ${name}?`)) {
+      deleteUser(id);
+      setUsers(getAllUsers());
+      if (currentUser) logAction(currentUser, `Deleted user account: ${name}`, 'LOGIN', `ID: ${id}`);
     }
   };
 
-  const getRoleBadge = (role: UserRole) => {
-    switch (role) {
-      case 'ADMIN': return <span className="px-3 py-1 bg-purple-100 text-purple-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-purple-200">Practice Admin</span>;
-      case 'CLINICAL': return <span className="px-3 py-1 bg-blue-100 text-blue-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-blue-200">Clinical Staff</span>;
-      case 'ADMIN_STAFF': return <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-200">Admin Staff</span>;
+  const startEdit = (user: User) => {
+    setEditingId(user.id);
+    setEditForm(user);
+  };
+
+  const handleUpdate = () => {
+    if (editForm.id) {
+      saveUser(editForm as User);
+      setUsers(getAllUsers());
+      setEditingId(null);
+      if (currentUser) logAction(currentUser, `Updated user permissions: ${editForm.name}`, 'LOGIN', `New Role: ${editForm.role}`);
     }
   };
+
+  const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">User & Access Control</h2>
           <p className="text-slate-500">Manage organizational accounts and clinical permissions.</p>
         </div>
         <button 
-          onClick={() => { setError(null); setShowAddModal(true); }}
-          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 active:scale-95"
+          onClick={() => setIsAdding(true)}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
         >
           <UserPlus size={20} /> Provision User
         </button>
       </div>
 
-      <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden min-h-[400px]">
-        {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center text-slate-400">
-             <Loader2 className="animate-spin mb-4" size={40} />
-             <p className="font-medium">Syncing user registry...</p>
-          </div>
-        ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Member</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Clinical Role</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Access Control</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {users.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-8 py-5">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-500 font-black text-lg shadow-sm border border-white">
-                        {user.name.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-900 text-sm">{user.name}</p>
-                        <p className="text-xs text-slate-400 font-medium">{user.email || 'No email provided'}</p>
-                      </div>
+      <div className="bg-white rounded-[32px] shadow-sm border border-slate-100 overflow-hidden">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-50/50">
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Member</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Username</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Clinical Role</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Access Control</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {users.map((user) => (
+              <tr key={user.id} className="group hover:bg-slate-50/50 transition-colors">
+                <td className="px-8 py-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center font-black text-slate-400 text-sm">
+                      {getInitials(user.name)}
                     </div>
-                  </td>
-                  <td className="px-8 py-5">
-                    <div className="flex items-center gap-2 text-sm font-mono text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 w-fit">
-                      <Fingerprint size={14} className="text-slate-400" /> {user.username}
+                    <div>
+                      {editingId === user.id ? (
+                        <input 
+                          value={editForm.name} 
+                          onChange={e => setEditForm({...editForm, name: e.target.value})}
+                          className="font-bold text-slate-900 border-b border-blue-500 outline-none"
+                        />
+                      ) : (
+                        <p className="font-bold text-slate-900">{user.name}</p>
+                      )}
+                      {editingId === user.id ? (
+                        <input 
+                          value={editForm.email} 
+                          onChange={e => setEditForm({...editForm, email: e.target.value})}
+                          className="text-xs text-slate-400 block border-b border-blue-500 outline-none mt-1"
+                        />
+                      ) : (
+                        <p className="text-xs text-slate-400">{user.email}</p>
+                      )}
                     </div>
-                  </td>
-                  <td className="px-8 py-5">
-                    {getRoleBadge(user.role)}
-                    {user.npi && <p className="text-[10px] text-slate-400 mt-2 font-mono">NPI: {user.npi}</p>}
-                  </td>
-                  <td className="px-8 py-5 text-right">
-                    <button 
-                      onClick={() => handleDeleteUser(user.id, user.name)}
-                      disabled={user.id === currentUser?.id}
-                      className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all disabled:opacity-0"
-                      title="Revoke System Access"
+                  </div>
+                </td>
+                <td className="px-8 py-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-500 font-mono">
+                    <Fingerprint size={14} className="opacity-30" />
+                    {user.username}
+                  </div>
+                </td>
+                <td className="px-8 py-6">
+                  {editingId === user.id ? (
+                    <select 
+                      value={editForm.role}
+                      onChange={e => setEditForm({...editForm, role: e.target.value as any})}
+                      className="text-[10px] font-black uppercase tracking-wider bg-white border border-blue-200 rounded-lg px-2 py-1 outline-none"
                     >
-                      <Trash2 size={20} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                      <option value="ADMIN">Practice Admin</option>
+                      <option value="PROVIDER">Medical Provider</option>
+                      <option value="BILLER">Billing / Admin</option>
+                    </select>
+                  ) : (
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg ${
+                      user.role === 'ADMIN' ? 'bg-purple-50 text-purple-600' : 
+                      user.role === 'PROVIDER' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
+                    }`}>
+                      {user.role === 'ADMIN' ? 'Practice Admin' : user.role === 'PROVIDER' ? 'Medical Provider' : 'Billing / Admin'}
+                    </span>
+                  )}
+                </td>
+                <td className="px-8 py-6 text-right">
+                  <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {editingId === user.id ? (
+                      <>
+                        <button onClick={handleUpdate} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Save Changes">
+                          <Check size={18} />
+                        </button>
+                        <button onClick={() => setEditingId(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg" title="Cancel">
+                          <X size={18} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => startEdit(user)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Edit Member">
+                          <Edit2 size={18} />
+                        </button>
+                        <button onClick={() => handleDelete(user.id, user.name)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg" title="Revoke Access">
+                          <Trash2 size={18} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {showAddModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="p-8 bg-slate-900 text-white flex justify-between items-center relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 rounded-full blur-3xl -mr-16 -mt-16"></div>
-              <div className="relative z-10">
-                <h3 className="text-2xl font-bold flex items-center gap-3">
-                  <UserPlus className="text-blue-400" size={24} /> Provision New Account
-                </h3>
-                <p className="text-slate-400 text-sm mt-1">Authorized Practice Personnel Only</p>
+      {/* Provisioning Modal */}
+      {isAdding && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8 bg-blue-600 text-white flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-bold">Provision New User</h3>
+                <p className="text-blue-100 text-xs">Establish secure clinical credentials.</p>
               </div>
-              <button onClick={() => setShowAddModal(false)} className="hover:bg-white/10 p-2 rounded-full transition-colors relative z-10"><X size={24} /></button>
+              <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                <X size={24} />
+              </button>
             </div>
             
-            <form onSubmit={handleAddUser} className="p-10 space-y-6">
-              {error && (
-                <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-sm font-bold flex items-center gap-2">
-                  <AlertCircle size={18} /> {error}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-6">
+            <div className="p-10 space-y-6">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Legal Name</label>
-                  <div className="relative group">
-                    <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
-                    <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Full Name" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" />
-                  </div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Full Legal Name</label>
+                  <input 
+                    type="text" 
+                    value={newUserForm.name}
+                    onChange={e => setNewUserForm({...newUserForm, name: e.target.value})}
+                    placeholder="e.g. Dr. Jordan Smith"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
-                  <div className="relative group">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
-                    <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="office@practice.com" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" />
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Work Email Address</label>
+                  <input 
+                    type="email" 
+                    value={newUserForm.email}
+                    onChange={e => setNewUserForm({...newUserForm, email: e.target.value})}
+                    placeholder="j.smith@yourpractice.com"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Username</label>
+                  <input 
+                    type="text" 
+                    value={newUserForm.username}
+                    onChange={e => setNewUserForm({...newUserForm, username: e.target.value})}
+                    placeholder="jsmith"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">System Access Role</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {['ADMIN', 'PROVIDER', 'BILLER'].map(role => (
+                      <button 
+                        key={role}
+                        onClick={() => setNewUserForm({...newUserForm, role: role as any})}
+                        className={`px-4 py-3 rounded-xl border text-left flex items-center justify-between transition-all ${
+                          newUserForm.role === role ? 'border-blue-600 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200'
+                        }`}
+                      >
+                        <span className="text-sm font-bold text-slate-700">{role === 'ADMIN' ? 'Practice Admin' : role === 'PROVIDER' ? 'Medical Provider' : 'Billing / Admin'}</span>
+                        {newUserForm.role === role && <Check size={16} className="text-blue-600" />}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Unique Username</label>
-                  <div className="relative group">
-                    <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
-                    <input required type="text" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} placeholder="Username" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Initial Password</label>
-                  <div className="relative group">
-                    <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
-                    <input required type="text" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Set Password" className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Practice Role</label>
-                  <div className="relative group">
-                    <Shield className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
-                    <select 
-                      value={formData.role}
-                      onChange={e => setFormData({...formData, role: e.target.value as UserRole})}
-                      className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all appearance-none"
-                    >
-                      <option value="CLINICAL">Clinical Staff</option>
-                      <option value="ADMIN_STAFF">Administrative Staff</option>
-                      <option value="ADMIN">Practice Administrator</option>
-                    </select>
-                  </div>
-                </div>
-                {formData.role === 'CLINICAL' && (
-                  <div className="animate-in slide-in-from-bottom-2 duration-300">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">NPI Number</label>
-                    <input type="text" value={formData.npi} onChange={e => setFormData({...formData, npi: e.target.value})} placeholder="10-digit NPI" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all" />
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-6">
-                <button 
-                  type="submit"
-                  className="w-full py-4 bg-blue-600 text-white font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 active:scale-[0.98] flex items-center justify-center gap-3"
-                >
-                  <Plus size={20} /> Grant Access
-                </button>
-              </div>
-            </form>
+              <button 
+                onClick={handleProvision}
+                className="w-full py-5 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-3xl hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
+              >
+                Provision Account
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -16,11 +16,7 @@ export interface AppealLetterRequest {
   insuranceProvider: string;
   denialReason: string;
   clinicalEvidence: string;
-  practiceGuidelines?: string;
-  positionStatements?: string;
-  letterheadInfo?: string; // Extracted text/branding info
   cptCode: string;
-  serviceName: string;
   templateType: AppealType;
 }
 
@@ -30,18 +26,8 @@ export enum View {
   APPEALS = 'APPEALS',
   HISTORY = 'HISTORY',
   LIBRARY = 'LIBRARY',
-  USERS = 'USERS',
-  SETTINGS = 'SETTINGS'
-}
-
-export interface CaseRecord {
-  id: string;
-  timestamp: string;
-  patientName: string;
-  cptCode: string;
-  type: 'Analysis' | 'Appeal';
-  status: string;
-  details?: any;
+  SECURITY = 'SECURITY',
+  USER_MANAGEMENT = 'USER_MANAGEMENT'
 }
 
 export interface PolicyHistoryEntry {
@@ -70,6 +56,15 @@ export interface MedicalPolicy {
   digest?: PolicyDigest;
 }
 
+export interface AuthRecord {
+  id: string;
+  date: string;
+  patient: string;
+  cpt: string;
+  status: string;
+  result: string;
+}
+
 export interface RedactionMapping {
   [key: string]: string;
 }
@@ -77,38 +72,18 @@ export interface RedactionMapping {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  actor: string;
+  user: string;
   action: string;
-  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT' | 'SYSTEM_SETTINGS';
+  resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT';
   details: string;
   ipAddress: string;
 }
 
-export type UserRole = 'ADMIN' | 'CLINICAL' | 'ADMIN_STAFF';
-
 export interface User {
   id: string;
-  username: string;
-  password?: string;
   name: string;
-  role: UserRole;
+  username: string;
+  email: string;
+  role: 'ADMIN' | 'PROVIDER' | 'BILLER';
   npi?: string;
-  email?: string;
-  createdAt: string;
-}
-
-export interface CloudConfig {
-  enabled: boolean;
-  supabaseUrl: string;
-  supabaseKey: string;
-  lastSync?: string;
-}
-
-export interface PracticeSettings {
-  practiceName: string;
-  npi: string;
-  taxId: string;
-  enforceSecureMode: boolean;
-  autoLogoutMinutes: number;
-  cloud?: CloudConfig;
 }

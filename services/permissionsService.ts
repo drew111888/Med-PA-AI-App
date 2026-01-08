@@ -1,5 +1,5 @@
 
-import { User, View, UserRole } from "../types.ts";
+import { User, View } from "../types.ts";
 
 export type Permission = 
   | 'view_dashboard'
@@ -8,10 +8,9 @@ export type Permission =
   | 'manage_policies'
   | 'view_history'
   | 'view_audit_logs'
-  | 'manage_users'
-  | 'manage_settings';
+  | 'manage_users';
 
-const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+const ROLE_PERMISSIONS: Record<User['role'], Permission[]> = {
   ADMIN: [
     'view_dashboard',
     'run_clinical_analysis',
@@ -19,17 +18,16 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'manage_policies',
     'view_history',
     'view_audit_logs',
-    'manage_users',
-    'manage_settings'
+    'manage_users'
   ],
-  CLINICAL: [
+  PROVIDER: [
     'view_dashboard',
     'run_clinical_analysis',
     'build_appeals',
     'manage_policies',
     'view_history'
   ],
-  ADMIN_STAFF: [
+  BILLER: [
     'view_dashboard',
     'build_appeals',
     'view_history'
@@ -49,8 +47,7 @@ export const canAccessView = (user: User | null, view: View): boolean => {
     case View.APPEALS: return hasPermission(user, 'build_appeals');
     case View.HISTORY: return hasPermission(user, 'view_history');
     case View.LIBRARY: return true;
-    case View.USERS: return hasPermission(user, 'manage_users');
-    case View.SETTINGS: return hasPermission(user, 'manage_settings');
+    case View.USER_MANAGEMENT: return hasPermission(user, 'manage_users');
     default: return false;
   }
 };
