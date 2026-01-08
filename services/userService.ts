@@ -28,12 +28,17 @@ const DEFAULT_USERS: User[] = [
 ];
 
 export const getAllUsers = (): User[] => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_USERS));
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_USERS));
+      return DEFAULT_USERS;
+    }
+    return JSON.parse(stored);
+  } catch (error) {
+    console.error("Failed to parse users from storage", error);
     return DEFAULT_USERS;
   }
-  return JSON.parse(stored);
 };
 
 export const saveUser = (user: User) => {

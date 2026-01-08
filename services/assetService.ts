@@ -5,13 +5,18 @@ const BRANDING_KEY = 'medauth_practice_branding';
 const STATEMENTS_KEY = 'medauth_position_statements';
 
 export const getBranding = (): PracticeBranding => {
-  const stored = localStorage.getItem(BRANDING_KEY);
-  return stored ? JSON.parse(stored) : {
-    name: '',
-    address: '',
-    npi: '',
-    contactEmail: ''
-  };
+  try {
+    const stored = localStorage.getItem(BRANDING_KEY);
+    return stored ? JSON.parse(stored) : {
+      name: '',
+      address: '',
+      npi: '',
+      contactEmail: ''
+    };
+  } catch (e) {
+    console.error("Error loading branding assets", e);
+    return { name: '', address: '', npi: '', contactEmail: '' };
+  }
 };
 
 export const saveBranding = (branding: PracticeBranding) => {
@@ -19,8 +24,13 @@ export const saveBranding = (branding: PracticeBranding) => {
 };
 
 export const getStatements = (): PositionStatement[] => {
-  const stored = localStorage.getItem(STATEMENTS_KEY);
-  return stored ? JSON.parse(stored) : [];
+  try {
+    const stored = localStorage.getItem(STATEMENTS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    console.error("Error loading position statements", e);
+    return [];
+  }
 };
 
 export const saveStatement = (statement: PositionStatement) => {
