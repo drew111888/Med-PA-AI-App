@@ -1,6 +1,16 @@
 
 import React from 'react';
-import { LayoutDashboard, ShieldCheck, FileText, History, Settings, Library, LogOut, Lock, Users } from 'lucide-react';
+import { 
+  LayoutDashboard, 
+  ShieldCheck, 
+  FileText, 
+  History, 
+  Settings as SettingsIcon, 
+  Library, 
+  LogOut, 
+  Lock, 
+  Users 
+} from 'lucide-react';
 import { View, User } from '../types.ts';
 import { canAccessView } from '../services/permissionsService.ts';
 
@@ -79,7 +89,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
             currentView === View.SETTINGS ? 'bg-slate-800 text-white' : 'hover:bg-slate-800'
           }`}
         >
-          <Settings size={18} />
+          <SettingsIcon size={18} />
           System Settings
         </button>
       </div>

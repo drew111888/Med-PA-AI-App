@@ -18,9 +18,13 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    const activeUser = getCurrentUser();
-    if (activeUser) {
-      setUser(activeUser);
+    try {
+      const activeUser = getCurrentUser();
+      if (activeUser) {
+        setUser(activeUser);
+      }
+    } catch (e) {
+      console.error("Critical error during session recovery", e);
     }
   }, []);
 
@@ -36,23 +40,34 @@ const App: React.FC = () => {
   };
 
   const renderView = () => {
-    switch (currentView) {
-      case View.DASHBOARD:
-        return <Dashboard onNavigate={setCurrentView} />;
-      case View.ANALYZER:
-        return <Analyzer />;
-      case View.APPEALS:
-        return <Appeals />;
-      case View.HISTORY:
-        return <History />;
-      case View.LIBRARY:
-        return <PolicyLibrary />;
-      case View.USER_MANAGEMENT:
-        return <UserManagement />;
-      case View.SETTINGS:
-        return <PracticeSettings />;
-      default:
-        return <Dashboard onNavigate={setCurrentView} />;
+    try {
+      switch (currentView) {
+        case View.DASHBOARD:
+          return <Dashboard onNavigate={setCurrentView} />;
+        case View.ANALYZER:
+          return <Analyzer />;
+        case View.APPEALS:
+          return <Appeals />;
+        case View.HISTORY:
+          return <History />;
+        case View.LIBRARY:
+          return <PolicyLibrary />;
+        case View.USER_MANAGEMENT:
+          return <UserManagement />;
+        case View.SETTINGS:
+          return <PracticeSettings />;
+        default:
+          return <Dashboard onNavigate={setCurrentView} />;
+      }
+    } catch (e) {
+      console.error("View rendering error", e);
+      return (
+        <div className="p-12 text-center bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-900 mb-4">View Load Error</h2>
+          <p className="text-slate-500 mb-8">An error occurred while loading this module. This is often due to corrupted local configuration.</p>
+          <button onClick={() => setCurrentView(View.DASHBOARD)} className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold">Return to Dashboard</button>
+        </div>
+      );
     }
   };
 
@@ -61,14 +76,14 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar 
         currentView={currentView} 
         onNavigate={setCurrentView} 
         user={user} 
         onLogout={handleLogout} 
       />
-      <main className="flex-1 ml-64 overflow-y-auto p-8">
+      <main className="flex-1 ml-64 overflow-y-auto p-8 bg-slate-50/50">
         <div className="max-w-6xl mx-auto">
           {renderView()}
         </div>

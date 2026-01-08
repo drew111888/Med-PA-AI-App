@@ -1,20 +1,40 @@
 
-import React, { useState, useRef } from 'react';
-import { Building2, Save, Image as ImageIcon, Plus, Trash2, Edit3, CheckCircle2, Info, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  Building2, 
+  Save, 
+  Image as ImageIcon, 
+  Plus, 
+  Trash2, 
+  Edit3, 
+  CheckCircle2, 
+  Info, 
+  X 
+} from 'lucide-react';
 import { PracticeBranding, PositionStatement } from '../types.ts';
 import { getBranding, saveBranding, getStatements, saveStatement, deleteStatement } from '../services/assetService.ts';
 
 const PracticeSettings: React.FC = () => {
-  const [branding, setBranding] = useState<PracticeBranding>(getBranding());
-  const [statements, setStatements] = useState<PositionStatement[]>(getStatements());
+  const [branding, setBranding] = useState<PracticeBranding>(() => getBranding());
+  const [statements, setStatements] = useState<PositionStatement[]>(() => getStatements());
   const [isAddingStatement, setIsAddingStatement] = useState(false);
   const [editingStatement, setEditingStatement] = useState<PositionStatement | null>(null);
   const [showSavedToast, setShowSavedToast] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync state if localStorage changes elsewhere
+  useEffect(() => {
+    setBranding(getBranding());
+    setStatements(getStatements());
+  }, []);
+
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 1024 * 1024) {
+        alert("Logo must be under 1MB for local storage.");
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setBranding({ ...branding, logo: reader.result as string });
@@ -36,12 +56,19 @@ const PracticeSettings: React.FC = () => {
     setIsAddingStatement(false);
   };
 
+  const handleRemoveStatement = (id: string) => {
+    if (window.confirm('Are you sure you want to remove this position statement?')) {
+      deleteStatement(id);
+      setStatements(getStatements());
+    }
+  };
+
   return (
-    <div className="space-y-10 pb-20 max-w-4xl mx-auto">
+    <div className="space-y-10 pb-20 max-w-4xl mx-auto animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">System Settings</h2>
-          <p className="text-slate-500">Configure practice branding and reusable position statements.</p>
+          <p className="text-slate-500">Configure practice branding and reusable clinical statements.</p>
         </div>
         {showSavedToast && (
           <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100 animate-in fade-in slide-in-from-right-4">
@@ -51,6 +78,7 @@ const PracticeSettings: React.FC = () => {
         )}
       </div>
 
+      {/* Office Branding Section */}
       <section className="bg-white rounded-[32px] shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-8 border-b border-slate-50 flex items-center gap-3">
           <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
@@ -58,14 +86,14 @@ const PracticeSettings: React.FC = () => {
           </div>
           <div>
             <h3 className="text-lg font-bold text-slate-900">Office Branding</h3>
-            <p className="text-xs text-slate-400">Used for letterheads and professional exports.</p>
+            <p className="text-xs text-slate-400">Personalize letterheads and medical reports.</p>
           </div>
         </div>
         
         <div className="p-10 space-y-8">
-          <div className="flex items-start gap-10">
-            <div className="space-y-4">
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Practice Logo</label>
+          <div className="flex flex-col md:flex-row items-start gap-10">
+            <div className="space-y-4 w-full md:w-auto flex flex-col items-center">
+              <label className="block w-full text-[10px] font-black text-slate-400 uppercase tracking-widest text-center md:text-left">Practice Logo</label>
               <div 
                 onClick={() => fileInputRef.current?.click()}
                 className="w-40 h-40 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all overflow-hidden"
@@ -82,7 +110,7 @@ const PracticeSettings: React.FC = () => {
               <input type="file" ref={fileInputRef} onChange={handleLogoUpload} className="hidden" accept="image/*" />
             </div>
 
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Practice Name</label>
                 <input 
@@ -107,20 +135,21 @@ const PracticeSettings: React.FC = () => {
                   rows={2}
                   value={branding.address}
                   onChange={e => setBranding({...branding, address: e.target.value})}
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
             </div>
           </div>
           <button 
             onClick={handleSaveBranding}
-            className="w-full py-4 bg-slate-900 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+            className="w-full py-4 bg-slate-900 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl shadow-slate-200"
           >
-            <Save size={18} /> Update Practice Assets
+            <Save size={18} /> Save Practice Assets
           </button>
         </div>
       </section>
 
+      {/* Position Statements Section */}
       <section className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -129,7 +158,7 @@ const PracticeSettings: React.FC = () => {
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900">Position Statements</h3>
-              <p className="text-xs text-slate-400">Standardized clinical rebuttals for quick injection.</p>
+              <p className="text-xs text-slate-400">Standardized rebuttals for Appeal Builder injection.</p>
             </div>
           </div>
           <button 
@@ -142,28 +171,29 @@ const PracticeSettings: React.FC = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {statements.map(s => (
-            <div key={s.id} className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm hover:border-blue-200 transition-all group">
+            <div key={s.id} className="bg-white p-6 rounded-[28px] border border-slate-100 shadow-sm hover:border-blue-200 transition-all group flex flex-col">
               <div className="flex items-start justify-between mb-4">
                 <span className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-black uppercase rounded tracking-widest">{s.category}</span>
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={() => setEditingStatement(s)} className="p-1.5 hover:bg-blue-50 rounded-lg text-slate-400 hover:text-blue-600 transition-colors"><Edit3 size={16} /></button>
-                  <button onClick={() => { if(window.confirm('Delete this statement?')) { deleteStatement(s.id); setStatements(getStatements()); } }} className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"><Trash2 size={16} /></button>
+                  <button onClick={() => handleRemoveStatement(s.id)} className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"><Trash2 size={16} /></button>
                 </div>
               </div>
               <h4 className="font-bold text-slate-900 mb-2">{s.title}</h4>
-              <p className="text-xs text-slate-500 line-clamp-3 leading-relaxed">{s.content}</p>
+              <p className="text-xs text-slate-500 line-clamp-3 leading-relaxed mb-4">{s.content}</p>
             </div>
           ))}
           {statements.length === 0 && !isAddingStatement && (
             <div className="md:col-span-2 p-12 text-center border-2 border-dashed border-slate-200 rounded-[32px] text-slate-400">
               <Info className="mx-auto mb-4 opacity-30" size={40} />
               <p className="font-bold text-sm">No position statements found.</p>
-              <p className="text-xs mt-1">Upload standard clinic positions to use them in the Appeal Builder.</p>
+              <p className="text-xs mt-1">Visit Settings to upload reusable clincal stances.</p>
             </div>
           )}
         </div>
       </section>
 
+      {/* Modal for Statement Editing */}
       {(isAddingStatement || editingStatement) && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
           <div className="bg-white w-full max-w-xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -203,15 +233,18 @@ const PracticeSettings: React.FC = () => {
                 </div>
                 <button 
                   onClick={() => {
-                    const title = (document.getElementById('stmt-title') as HTMLInputElement).value;
-                    const cat = (document.getElementById('stmt-cat') as HTMLInputElement).value;
-                    const content = (document.getElementById('stmt-content') as HTMLTextAreaElement).value;
-                    handleSaveStatement({
-                      id: editingStatement?.id || Date.now().toString(),
-                      title,
-                      category: cat,
-                      content
-                    });
+                    const titleInput = document.getElementById('stmt-title') as HTMLInputElement;
+                    const catInput = document.getElementById('stmt-cat') as HTMLInputElement;
+                    const contentInput = document.getElementById('stmt-content') as HTMLTextAreaElement;
+                    
+                    if (titleInput && catInput && contentInput) {
+                      handleSaveStatement({
+                        id: editingStatement?.id || Date.now().toString(),
+                        title: titleInput.value,
+                        category: catInput.value,
+                        content: contentInput.value
+                      });
+                    }
                   }}
                   className="w-full py-5 bg-blue-600 text-white font-black uppercase tracking-widest text-xs rounded-3xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
                 >
