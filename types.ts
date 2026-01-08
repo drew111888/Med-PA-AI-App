@@ -16,6 +16,9 @@ export interface AppealLetterRequest {
   insuranceProvider: string;
   denialReason: string;
   clinicalEvidence: string;
+  practiceGuidelines?: string;
+  positionStatements?: string;
+  letterheadInfo?: string; // Extracted text/branding info
   cptCode: string;
   serviceName: string;
   templateType: AppealType;
@@ -74,7 +77,7 @@ export interface RedactionMapping {
 export interface AuditLog {
   id: string;
   timestamp: string;
-  actor: string; // Renamed from user to actor to avoid SQL reserved word conflicts
+  actor: string;
   action: string;
   resourceType: 'ANALYSIS' | 'APPEAL' | 'LOGIN' | 'POLICY_EXPORT' | 'USER_MANAGEMENT' | 'SYSTEM_SETTINGS';
   details: string;

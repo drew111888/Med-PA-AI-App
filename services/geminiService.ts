@@ -6,7 +6,7 @@ import { deIdentify, reIdentify } from "./complianceService.ts";
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Analyzes clinical notes against medical necessity guidelines using Gemini 3 Pro.
+ * Analyzes clinical notes against medical necessity guidelines.
  */
 export const analyzeGuidelines = async (
   guidelineText: string,
@@ -31,15 +31,13 @@ export const analyzeGuidelines = async (
     
     PATIENT CLINICAL NOTES:
     ${processedNotes}
-    
-    Evaluate if the criteria are met. Provide a confidence score and clear reasoning.
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: prompt,
     config: {
-      systemInstruction: "You are a senior medical necessity reviewer. Your task is to compare clinical documentation against insurance policy criteria. Be objective, precise, and identify specific missing documentation elements required for authorization approval. Return valid JSON.",
+      systemInstruction: "You are a senior medical necessity reviewer. Compare documentation against criteria. Return valid JSON.",
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -57,25 +55,124 @@ export const analyzeGuidelines = async (
   });
 
   const result: AnalysisResult = JSON.parse(response.text || "{}");
-  
   if (useSecureMode) {
     result.reasoning = reIdentify(result.reasoning, mapping);
     result.missingRequirements = (result.missingRequirements || []).map(r => reIdentify(r, mapping));
     result.suggestedActionItems = (result.suggestedActionItems || []).map(a => reIdentify(a, mapping));
   }
-
   return result;
 };
 
 /**
- * Generates a structured digest of a medical policy.
+ * Extracts office branding from a letterhead document.
+ */
+export const parseLetterhead = async (base64Data: string, mimeType: string): Promise<string> => {
+  // Correctly structure contents with parts for multimodal input
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: {
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: "Extract the practice name, address, phone, and website from this letterhead. Format it as a professional header for a medical letter." }
+      ]
+    },
+    config: {
+      systemInstruction: "Extract ONLY the contact and branding text from the provided letterhead image or PDF. Do not include any greeting or signature."
+    }
+  });
+  return response.text || "";
+};
+
+/**
+ * Extracts key evidence for rebutting a specific denial.
+ */
+export const extractClinicalEvidenceForRebuttal = async (
+  base64Data: string, 
+  mimeType: string, 
+  denialReason: string,
+  contextType: 'Clinical Record' | 'Practice Guideline' | 'Position Statement' = 'Clinical Record'
+): Promise<string> => {
+  // Correctly structure contents with parts for multimodal input
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: {
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: `The insurance company denied coverage for: "${denialReason}". Scan this ${contextType} and extract ONLY the evidence that specifically refutes this denial. Summarize key points and cite page/section if available.` }
+      ]
+    },
+    config: {
+      systemInstruction: "You are a physician advisor extracting evidence to overturn insurance denials. Be precise and evidence-based."
+    }
+  });
+  return response.text || "";
+};
+
+/**
+ * Generates a formal medical appeal letter.
+ */
+export const generateAppealLetter = async (request: AppealLetterRequest, useSecureMode: boolean = false): Promise<string> => {
+  let mapping: RedactionMapping = {};
+  let req = { ...request };
+
+  if (useSecureMode) {
+    const nameRed = deIdentify(request.patientName, { name: request.patientName });
+    req.patientName = "[PATIENT_NAME]";
+    const polRed = deIdentify(request.policyNumber, { policy: request.policyNumber });
+    req.policyNumber = "[POLICY_ID]";
+    const clinicalRed = deIdentify(request.clinicalEvidence, { name: request.patientName, policy: request.policyNumber });
+    req.clinicalEvidence = clinicalRed.redactedText;
+    mapping = { ...nameRed.mapping, ...polRed.mapping, ...clinicalRed.mapping };
+  }
+
+  const prompt = `
+    Draft a formal ${req.templateType} medical appeal letter.
+    
+    Practice Branding Header: ${req.letterheadInfo || 'None provided (Use standard professional header)'}
+    Patient: ${req.patientName}
+    Policy: ${req.policyNumber}
+    Insurance: ${req.insuranceProvider}
+    Denied Service/Med: ${req.serviceName || 'N/A'}
+    CPT: ${req.cptCode || 'Not provided'}
+    Reason for Denial: ${req.denialReason}
+    
+    CORE CLINICAL EVIDENCE: 
+    ${req.clinicalEvidence}
+    
+    SUPPORTING CLINICAL GUIDELINES (Use to cite standards of care):
+    ${req.practiceGuidelines || 'None provided'}
+    
+    MEDICAL POSITION STATEMENTS (Use to cite specialty consensus):
+    ${req.positionStatements || 'None provided'}
+    
+    Instructions:
+    - If a Practice Branding Header is provided, START the letter with it.
+    - Cite the Supporting Clinical Guidelines and Position Statements directly in the rebuttal.
+    - Ensure a formal physician tone.
+    - Close with a signature line for the treating physician.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: {
+      systemInstruction: "You are a senior physician advisor. Your letters are highly evidence-based and professionally formatted on practice letterhead. Use specific citations from provided guidelines."
+    }
+  });
+
+  const letter = response.text || "Failed to generate.";
+  return useSecureMode ? reIdentify(letter, mapping) : letter;
+};
+
+/**
+ * Generates a structured digest from a medical policy text.
  */
 export const generatePolicyDigest = async (policyContent: string): Promise<PolicyDigest> => {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: `Summarize this medical policy into a structured digest for medical office staff. Focus on what is required to get an authorization approved. \n\nPOLICY:\n${policyContent}`,
+    contents: `Summarize this medical policy: \n\n${policyContent}`,
     config: {
-      systemInstruction: "You are a clinical policy analyst. Extract requirements, exclusions, and documentation checklists from long medical policies. Return valid JSON.",
+      systemInstruction: "Extract requirements, exclusions, and documentation checklists. Return JSON.",
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -89,29 +186,24 @@ export const generatePolicyDigest = async (policyContent: string): Promise<Polic
       }
     }
   });
-
   return JSON.parse(response.text || "{}");
 };
 
 /**
- * Extracts case details from a denial letter PDF.
+ * Extracts case details from a denial letter image or PDF.
  */
 export const parseDenialLetter = async (base64Data: string, mimeType: string): Promise<Partial<AppealLetterRequest>> => {
+  // Correctly structure contents with parts for multimodal input
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: [
-      {
-        inlineData: {
-          mimeType: mimeType,
-          data: base64Data
-        }
-      },
-      {
-        text: "Extract the case details from this insurance denial letter for an appeal: Patient Name, Insurance Carrier, Policy/Member ID, CPT/HCPCS Code, Medication/Service/Test Name, and the exact Reason for Denial."
-      }
-    ],
+    contents: {
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: "Extract case details." }
+      ]
+    },
     config: {
-      systemInstruction: "You are a medical billing specialist. Extract structured case data from denial letters. If a CPT code is missing, ensure you extract the name of the drug, test, or procedure denied. Return valid JSON.",
+      systemInstruction: "Extract Patient, Carrier, Policy, CPT, Service, Denial Reason. Return JSON.",
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -120,121 +212,30 @@ export const parseDenialLetter = async (base64Data: string, mimeType: string): P
           insuranceProvider: { type: Type.STRING },
           policyNumber: { type: Type.STRING },
           cptCode: { type: Type.STRING },
-          serviceName: { type: Type.STRING, description: "The medication name, test name, or procedure description denied." },
+          serviceName: { type: Type.STRING },
           denialReason: { type: Type.STRING }
         }
       }
     }
   });
-
   return JSON.parse(response.text || "{}");
 };
 
 /**
- * Scans medical records to find evidence specifically relevant to a denial reason.
- */
-export const extractClinicalEvidenceForRebuttal = async (
-  base64Data: string, 
-  mimeType: string, 
-  denialReason: string
-): Promise<string> => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: [
-      {
-        inlineData: {
-          mimeType: mimeType,
-          data: base64Data
-        }
-      },
-      {
-        text: `The insurance company denied coverage for the following reason: "${denialReason}". 
-               Scan these clinical records and extract ONLY the clinical evidence (findings, history, failed treatments, imaging) that specifically refutes or addresses this denial reason. 
-               Summarize the rebuttal points concisely.`
-      }
-    ],
-    config: {
-      systemInstruction: "You are a physician advisor. Extract evidence from clinical documents to overturn a specific insurance denial. Focus only on relevant clinical facts."
-    }
-  });
-
-  return response.text || "";
-};
-
-/**
- * Generates a formal medical appeal letter using Gemini 3 Flash.
- */
-export const generateAppealLetter = async (request: AppealLetterRequest, useSecureMode: boolean = false): Promise<string> => {
-  let mapping: RedactionMapping = {};
-  let req = { ...request };
-
-  if (useSecureMode) {
-    const nameRedaction = deIdentify(request.patientName, { name: request.patientName });
-    req.patientName = "[PATIENT_NAME]";
-    
-    const policyRedaction = deIdentify(request.policyNumber, { policy: request.policyNumber });
-    req.policyNumber = "[POLICY_ID]";
-    
-    const evidenceRedaction = deIdentify(request.clinicalEvidence, { name: request.patientName, policy: request.policyNumber });
-    req.clinicalEvidence = evidenceRedaction.redactedText;
-
-    mapping = { 
-      ...nameRedaction.mapping, 
-      ...policyRedaction.mapping, 
-      ...evidenceRedaction.mapping 
-    };
-  }
-
-  const prompt = `
-    Draft a formal ${req.templateType} medical appeal letter.
-    
-    Patient: ${req.patientName}
-    Policy: ${req.policyNumber}
-    Insurance: ${req.insuranceProvider}
-    Denied Service/Medication: ${req.serviceName || 'N/A'}
-    CPT: ${req.cptCode || 'Not provided'}
-    Reason for Denial: ${req.denialReason}
-    Supporting Clinical Evidence: ${req.clinicalEvidence}
-    
-    Instructions:
-    - Use professional medical tone.
-    - Cite the clinical evidence specifically.
-    - If it's a 'Medical Necessity' appeal, focus on why the service is the standard of care.
-    - If it's 'Experimental', cite potential clinical trial evidence or FDA status.
-    - Use standard HIPAA-compliant letter formatting.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: "You are a senior medical billing advocate and physician advisor. Your letters are highly professional, evidence-based, and designed to overturn insurance denials."
-    }
-  });
-
-  const letter = response.text || "Failed to generate letter.";
-  return useSecureMode ? reIdentify(letter, mapping) : letter;
-};
-
-/**
- * Parses medical policy documents (PDF/Text) into structured data.
+ * Extracts policy details from a medical policy document.
  */
 export const parsePolicyDocument = async (base64Data: string, mimeType: string): Promise<Partial<MedicalPolicy>> => {
+  // Correctly structure contents with parts for multimodal input
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: [
-      {
-        inlineData: {
-          mimeType: mimeType,
-          data: base64Data
-        }
-      },
-      {
-        text: "Extract the following details from this medical policy document: Carrier name, Policy Title, CPT Codes mentioned, any Medications mentioned, and a summary of the Clinical Necessity Guidelines."
-      }
-    ],
+    contents: {
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: "Extract policy details." }
+      ]
+    },
     config: {
-      systemInstruction: "You are a medical data extraction expert. Extract structural information from insurance carrier policy documents and return it in a structured format.",
+      systemInstruction: "Extract carrier, title, codes, meds, summary. Return JSON.",
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -249,6 +250,5 @@ export const parsePolicyDocument = async (base64Data: string, mimeType: string):
       }
     }
   });
-
   return JSON.parse(response.text || "{}");
 };

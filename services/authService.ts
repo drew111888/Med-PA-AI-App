@@ -8,18 +8,50 @@ const BAA_KEY = 'medauth_baa_agreement';
 
 const DEFAULT_USERS: User[] = [
   {
-    id: 'usr_admin',
+    id: 'usr_admin_orig',
     username: 'admin',
     password: 'admin123',
     name: 'Practice Administrator',
     role: 'ADMIN',
     email: 'admin@practice.com',
     createdAt: new Date().toISOString()
+  },
+  {
+    id: 'usr_admin_123',
+    username: 'admin123',
+    password: 'admin123',
+    name: 'System Admin (123)',
+    role: 'ADMIN',
+    email: 'admin123@practice.com',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'usr_alavear',
+    username: 'alavear',
+    password: 'admin123',
+    name: 'A. Lavear',
+    role: 'ADMIN',
+    email: 'alavear@practice.com',
+    createdAt: new Date().toISOString()
   }
 ];
 
 export const getUsers = async (): Promise<User[]> => {
-  return await storage.get<User[]>(USERS_KEY, DEFAULT_USERS);
+  const stored = await storage.get<User[]>(USERS_KEY, DEFAULT_USERS);
+  
+  // MERGE LOGIC: Ensure requested credentials always exist even if storage has old data
+  const merged = [...stored];
+  DEFAULT_USERS.forEach(defUser => {
+    if (!merged.some(u => u.username.toLowerCase() === defUser.username.toLowerCase())) {
+      merged.push(defUser);
+    }
+  });
+  
+  if (merged.length !== stored.length) {
+    await storage.set(USERS_KEY, merged);
+  }
+  
+  return merged;
 };
 
 export const addUser = async (user: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
