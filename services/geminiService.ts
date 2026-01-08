@@ -3,7 +3,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping, PolicyDigest } from "../types.ts";
 import { deIdentify, reIdentify } from "./complianceService.ts";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Defensive API key retrieval
+const getApiKey = () => {
+  try {
+    return (window as any).process?.env?.API_KEY || "";
+  } catch {
+    return "";
+  }
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 /**
  * Analyzes clinical notes against medical necessity guidelines using Gemini 3 Pro.

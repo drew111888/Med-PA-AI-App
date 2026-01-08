@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Sidebar from './components/Sidebar.tsx';
 import Dashboard from './components/Dashboard.tsx';
 import Analyzer from './components/Analyzer.tsx';
@@ -29,14 +29,16 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogout = () => {
-    if (user) logAction(user, 'User logged out', 'LOGIN', 'Session ended manually');
+    if (user) {
+      logAction(user, 'User logged out', 'LOGIN', 'Session ended manually').catch(console.error);
+    }
     authLogout();
     setUser(null);
   };
 
   const handleAuthenticated = (newUser: User) => {
     setUser(newUser);
-    logAction(newUser, 'User logged in', 'LOGIN', 'Session established with BAA verification');
+    logAction(newUser, 'User logged in', 'LOGIN', 'Session established with BAA verification').catch(console.error);
   };
 
   const renderView = () => {
@@ -60,12 +62,20 @@ const App: React.FC = () => {
           return <Dashboard onNavigate={setCurrentView} />;
       }
     } catch (e) {
-      console.error("View rendering error", e);
+      console.error("View rendering error:", e);
       return (
-        <div className="p-12 text-center bg-white rounded-3xl border border-slate-100 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">View Load Error</h2>
-          <p className="text-slate-500 mb-8">An error occurred while loading this module. This is often due to corrupted local configuration.</p>
-          <button onClick={() => setCurrentView(View.DASHBOARD)} className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold">Return to Dashboard</button>
+        <div className="flex flex-col items-center justify-center p-20 text-center bg-white rounded-[40px] shadow-sm border border-slate-100">
+          <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-6">
+            <span className="text-2xl font-bold">!</span>
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Module Loading Error</h2>
+          <p className="text-slate-500 max-w-md mb-8">The requested module could not be initialized. This may be due to a local storage conflict or module resolution error.</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all"
+          >
+            Reload Application
+          </button>
         </div>
       );
     }
@@ -76,7 +86,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans antialiased text-slate-900">
       <Sidebar 
         currentView={currentView} 
         onNavigate={setCurrentView} 
@@ -84,7 +94,7 @@ const App: React.FC = () => {
         onLogout={handleLogout} 
       />
       <main className="flex-1 ml-64 overflow-y-auto p-8 bg-slate-50/50">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-6xl mx-auto min-h-full">
           {renderView()}
         </div>
       </main>

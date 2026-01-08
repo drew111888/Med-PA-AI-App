@@ -5,7 +5,7 @@ import {
   ShieldCheck, 
   FileText, 
   History, 
-  Settings as SettingsIcon, 
+  Settings as LucideSettings, 
   Library, 
   LogOut, 
   Lock, 
@@ -32,7 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
   ].filter(item => canAccessView(user, item.id));
 
   return (
-    <div className="w-64 h-full bg-slate-900 text-slate-300 flex flex-col fixed left-0 top-0 border-r border-slate-800 z-50">
+    <div className="w-64 h-full bg-slate-900 text-slate-300 flex flex-col fixed left-0 top-0 border-r border-slate-800 z-50 shadow-2xl">
       <div className="p-6">
         <div className="flex items-center gap-3 mb-8">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -41,9 +41,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           <h1 className="text-xl font-bold tracking-tight text-white">MedAuth AI</h1>
         </div>
 
-        <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-800 mb-6">
+        <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50 mb-6">
           <div className="flex items-center gap-3 mb-2">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-sm ${
               user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 
               user.role === 'PROVIDER' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
             }`}>
@@ -58,7 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           </div>
           <button 
             onClick={onLogout}
-            className="w-full mt-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-all flex items-center justify-center gap-2"
+            className="w-full mt-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-all flex items-center justify-center gap-2"
           >
             <LogOut size={12} /> Sign Out
           </button>
@@ -70,9 +70,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           <button
             key={item.id}
             onClick={() => onNavigate(item.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
               currentView === item.id 
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' 
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' 
                 : 'hover:bg-slate-800 hover:text-white'
             }`}
           >
@@ -82,14 +82,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
         ))}
       </nav>
 
-      <div className="p-4 border-t border-slate-800">
+      <div className="p-4 border-t border-slate-800/50">
         <button 
           onClick={() => onNavigate(View.SETTINGS)}
-          className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
             currentView === View.SETTINGS ? 'bg-slate-800 text-white' : 'hover:bg-slate-800'
           }`}
         >
-          <SettingsIcon size={18} />
+          <LucideSettings size={18} />
           System Settings
         </button>
       </div>
