@@ -8,6 +8,7 @@ import History from './components/History.tsx';
 import PolicyLibrary from './components/PolicyLibrary.tsx';
 import SecurityGateway from './components/SecurityGateway.tsx';
 import UserManagement from './components/UserManagement.tsx';
+import Settings from './components/Settings.tsx';
 import { View, User } from './types.ts';
 import { getCurrentUser, logout as authLogout } from './services/authService.ts';
 import { logAction } from './services/auditService.ts';
@@ -48,6 +49,8 @@ const App: React.FC = () => {
         return <PolicyLibrary />;
       case View.USER_MANAGEMENT:
         return <UserManagement />;
+      case View.SETTINGS:
+        return <Settings />;
       default:
         return <Dashboard onNavigate={setCurrentView} />;
     }

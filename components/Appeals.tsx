@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { Send, Copy, Check, FileText, Loader2, RefreshCw, Trash2, Save, Download, Lock, Unlock, Sparkles, ChevronDown } from 'lucide-react';
+import { Send, Copy, Check, FileText, Loader2, RefreshCw, Trash2, Save, Download, Lock, Unlock, Sparkles, ChevronDown, BookMarked, Quote } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { generateAppealLetter } from '../services/geminiService.ts';
 import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
-import { AppealLetterRequest, AppealType } from '../types.ts';
+import { getBranding, getStatements } from '../services/assetService.ts';
+import { getPolicies } from '../services/policyService.ts';
+import { AppealLetterRequest, AppealType, PositionStatement, MedicalPolicy, PracticeBranding } from '../types.ts';
 
 const STORAGE_KEY = 'medauth_appeal_draft';
 const LETTER_STORAGE_KEY = 'medauth_appeal_letter_result';
@@ -23,6 +25,11 @@ const Appeals: React.FC = () => {
       templateType: 'Medical Necessity'
     };
   });
+
+  const [branding, setBranding] = useState<PracticeBranding>(getBranding());
+  const [statements, setStatements] = useState<PositionStatement[]>(getStatements());
+  const [policies, setPolicies] = useState<MedicalPolicy[]>(getPolicies());
+  const [showAssetDrawer, setShowAssetDrawer] = useState<'STATEMENTS' | 'POLICIES' | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [letter, setLetter] = useState(() => localStorage.getItem(LETTER_STORAGE_KEY) || '');
@@ -50,7 +57,11 @@ const Appeals: React.FC = () => {
     }
 
     try {
-      const generatedLetter = await generateAppealLetter(formData, secureMode);
+      // Prepend branding to help the AI format the letter correctly if it has that context
+      const generatedLetter = await generateAppealLetter({
+        ...formData,
+        clinicalEvidence: `[PRACTICE HEADER: ${branding.name}, NPI: ${branding.npi}]\n\n${formData.clinicalEvidence}`
+      }, secureMode);
       setLetter(generatedLetter);
     } catch (error) {
       console.error(error);
@@ -70,21 +81,43 @@ const Appeals: React.FC = () => {
     const doc = new jsPDF();
     const margin = 20;
     const pageWidth = doc.internal.pageSize.getWidth();
-    const splitText = doc.splitTextToSize(letter, pageWidth - margin * 2);
     
+    // Add Branding if exists
+    let startY = 20;
+    if (branding.logo) {
+      try {
+        doc.addImage(branding.logo, 'PNG', margin, startY, 40, 40);
+        startY += 45;
+      } catch (e) { console.error("Logo injection failed", e); }
+    }
+
     doc.setFont("times", "bold");
-    doc.setFontSize(16);
-    doc.text("MEDICAL APPEAL LETTER", margin, 20);
-    
+    doc.setFontSize(12);
+    doc.text(branding.name || 'Medical Practice', margin, startY);
+    startY += 6;
+    doc.setFontSize(10);
     doc.setFont("times", "normal");
-    doc.setFontSize(11);
-    doc.text(splitText, margin, 35);
+    doc.text(branding.address || '', margin, startY);
+    startY += 6;
+    doc.text(`NPI: ${branding.npi}`, margin, startY);
+    startY += 15;
+
+    const splitText = doc.splitTextToSize(letter, pageWidth - margin * 2);
+    doc.text(splitText, margin, startY);
     
     const fileName = `Appeal_${formData.patientName.replace(/\s+/g, '_') || 'Letter'}.pdf`;
     doc.save(fileName);
 
     const user = getCurrentUser();
     if (user) logAction(user, `PDF Downloaded for ${formData.patientName}`, 'POLICY_EXPORT', 'Appeal letter generated and saved');
+  };
+
+  const injectAsset = (content: string) => {
+    setFormData({
+      ...formData,
+      clinicalEvidence: `${formData.clinicalEvidence}\n\n${content}`.trim()
+    });
+    setShowAssetDrawer(null);
   };
 
   const resetDraft = () => {
@@ -159,12 +192,23 @@ const Appeals: React.FC = () => {
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Clinical Evidence</label>
-                <button className="text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline">
-                  <Sparkles size={10} /> Extract from Analyzer
-                </button>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Clinical Evidence & Rationale</label>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowAssetDrawer('STATEMENTS')}
+                    className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 hover:underline"
+                  >
+                    <Quote size={10} /> Position Statements
+                  </button>
+                  <button 
+                    onClick={() => setShowAssetDrawer('POLICIES')}
+                    className="text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                  >
+                    <BookMarked size={10} /> Policy Library
+                  </button>
+                </div>
               </div>
-              <textarea rows={5} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Clinical rationale to refute the denial..." className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              <textarea rows={8} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Insert clinical findings or pull from practice assets..." className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium" />
             </div>
           </div>
 
@@ -174,7 +218,48 @@ const Appeals: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex flex-col h-full min-h-[500px]">
+        <div className="flex flex-col h-full min-h-[500px] relative">
+          {showAssetDrawer && (
+            <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-50 rounded-2xl border border-slate-100 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right-10 duration-300">
+              <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+                <h3 className="font-bold flex items-center gap-2">
+                  {showAssetDrawer === 'STATEMENTS' ? <Quote size={18} /> : <BookMarked size={18} />}
+                  Insert {showAssetDrawer === 'STATEMENTS' ? 'Position Statement' : 'Clinical Guideline'}
+                </h3>
+                <button onClick={() => setShowAssetDrawer(null)} className="p-1 hover:bg-white/10 rounded-full transition-colors"><Trash2 size={20} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {showAssetDrawer === 'STATEMENTS' ? (
+                  statements.length > 0 ? statements.map(s => (
+                    <button key={s.id} onClick={() => injectAsset(s.content)} className="w-full text-left p-4 hover:bg-slate-50 border border-slate-100 rounded-xl transition-all group">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter">{s.category}</span>
+                        <Sparkles size={12} className="text-slate-200 group-hover:text-blue-500 transition-colors" />
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm">{s.title}</p>
+                      <p className="text-[10px] text-slate-500 mt-1 line-clamp-2">{s.content}</p>
+                    </button>
+                  )) : (
+                    <div className="p-10 text-center text-slate-400">
+                      <p className="text-sm">No position statements saved.</p>
+                      <p className="text-[10px] mt-1">Visit Settings to upload reusable clincal stances.</p>
+                    </div>
+                  )
+                ) : (
+                  policies.map(p => (
+                    <button key={p.id} onClick={() => injectAsset(p.content)} className="w-full text-left p-4 hover:bg-slate-50 border border-slate-100 rounded-xl transition-all group">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[10px] font-bold text-blue-600 uppercase tracking-tighter">{p.carrier}</span>
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm">{p.title}</p>
+                      <p className="text-[10px] text-slate-500 mt-1 line-clamp-2">{p.content}</p>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           {letter ? (
             <div className="bg-white flex-1 rounded-3xl shadow-xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
               <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
@@ -191,8 +276,8 @@ const Appeals: React.FC = () => {
           ) : (
             <div className="bg-slate-50 flex-1 rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-12 text-center text-slate-400">
               <Send size={48} className="mb-4 opacity-10" />
-              <p className="font-medium">Populate the case details to build a draft.</p>
-              <p className="text-xs mt-2 opacity-60 max-w-xs">Our AI will cite medical standards and refute denial reasons based on your input.</p>
+              <p className="font-medium">Populate details or insert assets to build a draft.</p>
+              <p className="text-xs mt-2 opacity-60 max-w-xs">Our AI will combine your practice positions and insurance rules into a professional appeal.</p>
             </div>
           )}
         </div>

@@ -73,7 +73,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
       </nav>
 
       <div className="p-4 border-t border-slate-800">
-        <button className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">
+        <button 
+          onClick={() => onNavigate(View.SETTINGS)}
+          className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            currentView === View.SETTINGS ? 'bg-slate-800 text-white' : 'hover:bg-slate-800'
+          }`}
+        >
           <Settings size={18} />
           System Settings
         </button>

@@ -27,7 +27,23 @@ export enum View {
   HISTORY = 'HISTORY',
   LIBRARY = 'LIBRARY',
   SECURITY = 'SECURITY',
-  USER_MANAGEMENT = 'USER_MANAGEMENT'
+  USER_MANAGEMENT = 'USER_MANAGEMENT',
+  SETTINGS = 'SETTINGS'
+}
+
+export interface PracticeBranding {
+  logo?: string; // base64
+  name: string;
+  address: string;
+  npi: string;
+  contactEmail: string;
+}
+
+export interface PositionStatement {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
 }
 
 export interface PolicyHistoryEntry {
