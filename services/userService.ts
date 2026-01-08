@@ -8,6 +8,7 @@ const DEFAULT_USERS: User[] = [
     id: '1',
     name: 'Practice Administrator',
     username: 'admin',
+    password: 'admin123',
     email: 'admin@practice.com',
     role: 'ADMIN'
   },
@@ -15,6 +16,7 @@ const DEFAULT_USERS: User[] = [
     id: '2',
     name: 'System Admin (123)',
     username: 'admin123',
+    password: 'admin123',
     email: 'admin123@practice.com',
     role: 'ADMIN'
   },
@@ -22,6 +24,7 @@ const DEFAULT_USERS: User[] = [
     id: '3',
     name: 'A. Lavear',
     username: 'alavear',
+    password: 'password123',
     email: 'alavear@practice.com',
     role: 'ADMIN'
   }
@@ -63,6 +66,7 @@ export const provisionUser = (data: Partial<User>): User => {
     id: `usr_${Math.random().toString(36).substr(2, 9)}`,
     name: data.name || 'New User',
     username: data.username || 'newuser',
+    password: data.password || 'Temporary123!',
     email: data.email || 'user@practice.com',
     role: data.role || 'PROVIDER',
     npi: data.npi

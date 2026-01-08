@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Trash2, Edit2, Shield, UserCircle, Fingerprint, X, Check, Save } from 'lucide-react';
+import { UserPlus, Trash2, Edit2, Shield, UserCircle, Fingerprint, X, Check, Save, Key, Eye, EyeOff } from 'lucide-react';
 import { User } from '../types.ts';
 import { getAllUsers, saveUser, deleteUser, provisionUser } from '../services/userService.ts';
 import { logAction } from '../services/auditService.ts';
@@ -10,10 +10,12 @@ const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showPass, setShowPass] = useState(false);
   const [editForm, setEditForm] = useState<Partial<User>>({});
   const [newUserForm, setNewUserForm] = useState<Partial<User>>({
     name: '',
     username: '',
+    password: '',
     email: '',
     role: 'PROVIDER'
   });
@@ -25,12 +27,14 @@ const UserManagement: React.FC = () => {
   }, []);
 
   const handleProvision = () => {
-    if (newUserForm.name && newUserForm.email) {
+    if (newUserForm.name && newUserForm.email && newUserForm.username && newUserForm.password) {
       const user = provisionUser(newUserForm);
       setUsers(getAllUsers());
       setIsAdding(false);
-      setNewUserForm({ name: '', username: '', email: '', role: 'PROVIDER' });
+      setNewUserForm({ name: '', username: '', password: '', email: '', role: 'PROVIDER' });
       if (currentUser) logAction(currentUser, `Provisioned new user: ${user.name}`, 'LOGIN', `Role: ${user.role}`);
+    } else {
+      alert("All fields including password are required for new accounts.");
     }
   };
 
@@ -118,9 +122,23 @@ const UserManagement: React.FC = () => {
                   </div>
                 </td>
                 <td className="px-8 py-6">
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-500 font-mono">
-                    <Fingerprint size={14} className="opacity-30" />
-                    {user.username}
+                  <div className="flex flex-col gap-1">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-500 font-mono w-fit">
+                      <Fingerprint size={14} className="opacity-30" />
+                      {user.username}
+                    </div>
+                    {editingId === user.id && (
+                      <div className="relative mt-2">
+                        <Key className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+                        <input 
+                          type="text"
+                          value={editForm.password}
+                          onChange={e => setEditForm({...editForm, password: e.target.value})}
+                          placeholder="New password"
+                          className="pl-7 pr-3 py-1.5 bg-white border border-blue-200 rounded-lg text-[10px] outline-none w-full"
+                        />
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td className="px-8 py-6">
@@ -189,7 +207,7 @@ const UserManagement: React.FC = () => {
             <div className="p-10 space-y-6">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Full Legal Name</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Full Legal Name</label>
                   <input 
                     type="text" 
                     value={newUserForm.name}
@@ -198,8 +216,39 @@ const UserManagement: React.FC = () => {
                     className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                   <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Username</label>
+                    <input 
+                      type="text" 
+                      value={newUserForm.username}
+                      onChange={e => setNewUserForm({...newUserForm, username: e.target.value})}
+                      placeholder="jsmith"
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Initial Password</label>
+                    <div className="relative">
+                      <input 
+                        type={showPass ? "text" : "password"}
+                        value={newUserForm.password}
+                        onChange={e => setNewUserForm({...newUserForm, password: e.target.value})}
+                        placeholder="••••••••"
+                        className="w-full pl-5 pr-10 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium text-xs"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPass(!showPass)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      >
+                        {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Work Email Address</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Work Email Address</label>
                   <input 
                     type="email" 
                     value={newUserForm.email}
@@ -209,21 +258,12 @@ const UserManagement: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Username</label>
-                  <input 
-                    type="text" 
-                    value={newUserForm.username}
-                    onChange={e => setNewUserForm({...newUserForm, username: e.target.value})}
-                    placeholder="jsmith"
-                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">System Access Role</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">System Access Role</label>
                   <div className="grid grid-cols-1 gap-2">
                     {['ADMIN', 'PROVIDER', 'BILLER'].map(role => (
                       <button 
                         key={role}
+                        type="button"
                         onClick={() => setNewUserForm({...newUserForm, role: role as any})}
                         className={`px-4 py-3 rounded-xl border text-left flex items-center justify-between transition-all ${
                           newUserForm.role === role ? 'border-blue-600 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200'
@@ -241,7 +281,7 @@ const UserManagement: React.FC = () => {
                 onClick={handleProvision}
                 className="w-full py-5 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-3xl hover:bg-slate-800 transition-all shadow-xl shadow-slate-200"
               >
-                Provision Account
+                Provision Account Credentials
               </button>
             </div>
           </div>

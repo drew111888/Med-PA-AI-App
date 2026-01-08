@@ -12,12 +12,21 @@ export const getCurrentUser = (): User | null => {
   }
 };
 
-export const login = (agreementSigned: boolean, user: User): User | null => {
-  if (!agreementSigned || !user) return null;
+/**
+ * Authenticates a user based on unique credentials
+ */
+export const authenticate = (username: string, password: string): User | null => {
+  const users = getAllUsers();
+  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
   
-  // Persist the specific user instance
-  localStorage.setItem('medauth_session', JSON.stringify(user));
-  return user;
+  if (user) {
+    // Return user without password for session storage
+    const { password, ...safeUser } = user;
+    localStorage.setItem('medauth_session', JSON.stringify(safeUser));
+    return safeUser as User;
+  }
+  
+  return null;
 };
 
 export const logout = () => {
