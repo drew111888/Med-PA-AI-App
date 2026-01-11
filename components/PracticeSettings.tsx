@@ -12,19 +12,25 @@ import {
   X,
   Activity,
   ShieldCheck,
-  Cpu
+  Cpu,
+  DownloadCloud,
+  UploadCloud,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { PracticeBranding, PositionStatement, BuildManifest } from '../types.ts';
 import { getBranding, saveBranding, getStatements, saveStatement, deleteStatement } from '../services/assetService.ts';
+import { exportWorkstationData, importWorkstationData } from '../services/dataService.ts';
 
 const SYSTEM_MANIFEST: BuildManifest = {
-  version: "2.8.4-Clinical",
+  version: "2.9.0-SnapshotReady",
   features: [
     { id: '1', label: 'Email Appeal Integration', status: 'Active' },
     { id: '2', label: 'Multi-Document Parsing', status: 'Active' },
     { id: '3', label: 'PHI Redaction Engine', status: 'Active' },
     { id: '4', label: 'Audit Logging (SOC2)', status: 'Active' },
     { id: '5', label: 'AI Policy Digestion', status: 'Active' },
+    { id: '6', label: 'Snapshot & Restore', status: 'Active' },
   ]
 };
 
@@ -34,7 +40,10 @@ const PracticeSettings: React.FC = () => {
   const [isAddingStatement, setIsAddingStatement] = useState(false);
   const [editingStatement, setEditingStatement] = useState<PositionStatement | null>(null);
   const [showSavedToast, setShowSavedToast] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setBranding(getBranding());
@@ -74,6 +83,24 @@ const PracticeSettings: React.FC = () => {
       deleteStatement(id);
       setStatements(getStatements());
     }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (window.confirm("CRITICAL: Importing a snapshot will OVERWRITE all current data (Users, Policies, etc.) with the contents of the backup file. Proceed?")) {
+      setIsRestoring(true);
+      const success = await importWorkstationData(file);
+      if (success) {
+        alert("Snapshot Restored Successfully. The application will now reload.");
+        window.location.reload();
+      } else {
+        alert("Failed to restore snapshot. The file may be corrupt.");
+        setIsRestoring(false);
+      }
+    }
+    if (importInputRef.current) importInputRef.current.value = '';
   };
 
   return (
@@ -146,6 +173,46 @@ const PracticeSettings: React.FC = () => {
               <button onClick={handleSaveBranding} className="w-full py-5 bg-slate-900 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl shadow-slate-200">
                 <Save size={18} /> Save Practice Assets
               </button>
+            </div>
+          </section>
+
+          <section className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
+            <div className="p-8 border-b border-slate-50 flex items-center gap-3">
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                <RefreshCw size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Workstation Snapshots</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Backup all system data (Users, Passwords, Policies) to a portable file.</p>
+              </div>
+            </div>
+            
+            <div className="p-10 space-y-6">
+              <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 flex items-start gap-4">
+                 <AlertTriangle className="text-amber-500 shrink-0" size={20} />
+                 <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                   Clinical history, custom users, and policy edits are stored in your browser's local cache. 
+                   <span className="block mt-2 font-black text-slate-900 uppercase tracking-tight">We strongly recommend exporting a snapshot after making user or policy changes.</span>
+                 </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 <button 
+                  onClick={exportWorkstationData}
+                  className="flex items-center justify-center gap-3 py-5 bg-white border-2 border-slate-200 rounded-3xl text-slate-900 font-black uppercase tracking-widest text-[10px] hover:border-blue-500 hover:bg-blue-50 transition-all"
+                 >
+                   <DownloadCloud size={20} className="text-blue-600" /> Export All Data (.json)
+                 </button>
+                 <button 
+                  onClick={() => importInputRef.current?.click()}
+                  disabled={isRestoring}
+                  className="flex items-center justify-center gap-3 py-5 bg-white border-2 border-slate-200 rounded-3xl text-slate-900 font-black uppercase tracking-widest text-[10px] hover:border-emerald-500 hover:bg-emerald-50 transition-all disabled:opacity-50"
+                 >
+                   {isRestoring ? <RefreshCw className="animate-spin text-emerald-600" size={20} /> : <UploadCloud size={20} className="text-emerald-600" />} 
+                   Restore from Snapshot
+                 </button>
+                 <input type="file" ref={importInputRef} onChange={handleImport} className="hidden" accept=".json" />
+              </div>
             </div>
           </section>
 

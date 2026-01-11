@@ -3,9 +3,14 @@ import { User } from "../types.ts";
 
 const STORAGE_KEY = 'medauth_users_registry';
 
-const DEFAULT_USERS: User[] = [
+/**
+ * DEFAULT_USERS serves as a "Seed" for empty workstations.
+ * Once any changes are made via the UI, the localStorage version becomes the primary database.
+ * To change these permanently, use the "User Management" tab in the app.
+ */
+const SEED_USERS: User[] = [
   {
-    id: '1',
+    id: 'seed_admin',
     name: 'Practice Administrator',
     username: 'admin',
     password: 'admin123',
@@ -13,15 +18,7 @@ const DEFAULT_USERS: User[] = [
     role: 'ADMIN'
   },
   {
-    id: '2',
-    name: 'System Admin (123)',
-    username: 'admin123',
-    password: 'admin123',
-    email: 'admin123@practice.com',
-    role: 'ADMIN'
-  },
-  {
-    id: '3',
+    id: 'seed_alavear',
     name: 'A. Lavear',
     username: 'alavear',
     password: 'password123',
@@ -34,13 +31,14 @@ export const getAllUsers = (): User[] => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_USERS));
-      return DEFAULT_USERS;
+      // First time run or cache cleared
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_USERS));
+      return SEED_USERS;
     }
     return JSON.parse(stored);
   } catch (error) {
-    console.error("Failed to parse users from storage", error);
-    return DEFAULT_USERS;
+    console.error("Critical: Failed to retrieve user registry from local database.", error);
+    return SEED_USERS;
   }
 };
 
