@@ -31,15 +31,16 @@ const Appeals: React.FC = () => {
   const [showAssetDrawer, setShowAssetDrawer] = useState<'STATEMENTS' | 'POLICIES' | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [parsingDoc, setParsingDoc] = useState<'DENIAL' | 'CLINICAL' | null>(null);
+  const [parsingDoc, setParsingDoc] = useState<'DENIAL' | 'CLINICAL' | 'POLICY' | null>(null);
   const [letter, setLetter] = useState('');
   const [copied, setCopied] = useState(false);
   const [secureMode, setSecureMode] = useState(true);
 
   const denialFileRef = useRef<HTMLInputElement>(null);
   const clinicalFileRef = useRef<HTMLInputElement>(null);
+  const policyFileRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'DENIAL' | 'CLINICAL') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'DENIAL' | 'CLINICAL' | 'POLICY') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -57,17 +58,23 @@ const Appeals: React.FC = () => {
             denialReason: result.content || '',
             insuranceProvider: result.carrier || prev.insuranceProvider 
           }));
-        } else {
+        } else if (type === 'CLINICAL') {
           setFormData(prev => ({ 
             ...prev, 
             clinicalEvidence: result.content || '',
             cptCode: result.cptCodes?.[0] || prev.cptCode 
           }));
+        } else if (type === 'POLICY') {
+          // Inject policy info into clinical evidence or use it as a base
+          setFormData(prev => ({
+             ...prev,
+             clinicalEvidence: `[GUIDELINE REFERENCE: ${result.title} (${result.carrier})]\n${result.content}\n\n${prev.clinicalEvidence}`.trim()
+          }));
         }
         setParsingDoc(null);
       };
     } catch (err) {
-      alert("Failed to parse document.");
+      alert("Failed to parse document. Please ensure it is a valid PDF or text file.");
       setParsingDoc(null);
     }
   };
@@ -83,7 +90,7 @@ const Appeals: React.FC = () => {
     try {
       const generatedLetter = await generateAppealLetter({
         ...formData,
-        clinicalEvidence: `[PRACTICE HEADER: ${branding.name}, NPI: ${branding.npi}]\n\n${formData.clinicalEvidence}`
+        clinicalEvidence: `[PRACTICE HEADER: ${branding.name || 'Practice'}, NPI: ${branding.npi || 'N/A'}]\n\n${formData.clinicalEvidence}`
       }, secureMode);
       
       setLetter(generatedLetter);
@@ -96,21 +103,21 @@ const Appeals: React.FC = () => {
           result: 'Appeal Created',
           type: 'Appeal'
         }, user);
-        logAction(user, `Appeal generated for ${formData.patientName}`, 'APPEAL', `Type: ${formData.templateType}`);
+        logAction(user, `Appeal generated for ${formData.patientName}`, 'APPEAL', `Type: ${formData.templateType}`).catch(console.error);
       }
     } catch (error) {
-      alert("Failed to generate appeal letter.");
+      alert("Failed to generate appeal letter. Please try again.");
     } finally {
-      setLoading(true);
-      setTimeout(() => setLoading(false), 500);
+      setLoading(false);
     }
   };
 
   const downloadAsPDF = () => {
+    if (!letter) return;
     const doc = new jsPDF();
     const splitText = doc.splitTextToSize(letter, 170);
     doc.text(splitText, 20, 20);
-    doc.save(`Appeal_${formData.patientName.replace(/\s+/g, '_')}.pdf`);
+    doc.save(`Appeal_${(formData.patientName || 'Record').replace(/\s+/g, '_')}.pdf`);
   };
 
   const injectAsset = (content: string) => {
@@ -185,18 +192,23 @@ const Appeals: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clinical Supporting Evidence</label>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-2">
                   <button onClick={() => setShowAssetDrawer('STATEMENTS')} className="text-[9px] font-black text-emerald-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
                     <Quote size={10} /> Practice Assets
+                  </button>
+                  <button onClick={() => policyFileRef.current?.click()} className="text-[9px] font-black text-amber-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
+                    {parsingDoc === 'POLICY' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
+                    Upload Guidelines
                   </button>
                   <button onClick={() => clinicalFileRef.current?.click()} className="text-[9px] font-black text-blue-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
                     {parsingDoc === 'CLINICAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
                     Upload Clinicals
                   </button>
                   <input type="file" ref={clinicalFileRef} className="hidden" onChange={e => handleFileUpload(e, 'CLINICAL')} accept=".pdf,.txt" />
+                  <input type="file" ref={policyFileRef} className="hidden" onChange={e => handleFileUpload(e, 'POLICY')} accept=".pdf,.txt" />
                 </div>
               </div>
-              <textarea rows={6} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Paste progress notes or upload records..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
+              <textarea rows={6} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Paste progress notes, guidlines, or upload records..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
             <button onClick={handleGenerate} disabled={loading} className="w-full py-5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 shadow-xl shadow-indigo-100 disabled:opacity-50">
@@ -262,7 +274,7 @@ const Appeals: React.FC = () => {
               <ClipboardList size={48} className="mb-4 text-slate-200" />
               <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Awaiting Build Inputs</p>
               <p className="text-[10px] text-slate-300 mt-2 max-w-[200px] font-bold uppercase tracking-tighter leading-tight">
-                Upload denial and clinical records to synthesize a professional appeal draft.
+                Upload denial, clinical records, and guidelines to synthesize a professional appeal draft.
               </p>
             </div>
           )}

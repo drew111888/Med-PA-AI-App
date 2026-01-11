@@ -31,6 +31,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     { id: View.USER_MANAGEMENT, label: 'User Management', icon: Users },
   ].filter(item => canAccessView(user, item.id));
 
+  // Safe split for initials
+  const initials = (user?.name || 'User Account')
+    .split(' ')
+    .filter(Boolean)
+    .map(n => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
   return (
     <div className="w-64 h-full bg-slate-900 text-slate-300 flex flex-col fixed left-0 top-0 border-r border-slate-800 z-50 shadow-2xl">
       <div className="p-6">
@@ -44,15 +53,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
         <div className="p-4 bg-slate-800/50 rounded-[20px] border border-slate-700/50 mb-6">
           <div className="flex items-center gap-3 mb-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shadow-inner ${
-              user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 
-              user.role === 'PROVIDER' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+              user?.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 
+              user?.role === 'PROVIDER' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
             }`}>
-              {user.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+              {initials}
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-black text-white truncate uppercase tracking-tighter">{user.name}</p>
+              <p className="text-xs font-black text-white truncate uppercase tracking-tighter">{user?.name || 'Anonymous'}</p>
               <p className="text-[9px] text-slate-400 font-bold flex items-center gap-1 uppercase tracking-widest mt-0.5">
-                <Lock size={10} className="text-emerald-500" /> {user.role}
+                <Lock size={10} className="text-emerald-500" /> {user?.role || 'Guest'}
               </p>
             </div>
           </div>

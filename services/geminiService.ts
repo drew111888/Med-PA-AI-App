@@ -3,8 +3,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping, PolicyDigest } from "../types.ts";
 import { deIdentify, reIdentify } from "./complianceService.ts";
 
-// Standardized Gemini API initialization using process.env.API_KEY directly
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazily initialize the AI client to avoid reference errors on module load
+let aiInstance: GoogleGenAI | null = null;
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = process?.env?.API_KEY || "";
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+};
 
 /**
  * Analyzes clinical notes against medical necessity guidelines using Gemini 3 Pro.
@@ -15,6 +22,7 @@ export const analyzeGuidelines = async (
   cptCode: string,
   useSecureMode: boolean = false
 ): Promise<AnalysisResult> => {
+  const ai = getAI();
   let processedNotes = clinicalNotes;
   let mapping: RedactionMapping = {};
 
@@ -57,10 +65,11 @@ export const analyzeGuidelines = async (
     }
   });
 
-  const result: AnalysisResult = JSON.parse(response.text || "{}");
+  const text = response.text || "{}";
+  const result: AnalysisResult = JSON.parse(text);
   
   if (useSecureMode) {
-    result.reasoning = reIdentify(result.reasoning, mapping);
+    result.reasoning = reIdentify(result.reasoning || "", mapping);
     result.missingRequirements = (result.missingRequirements || []).map(r => reIdentify(r, mapping));
     result.suggestedActionItems = (result.suggestedActionItems || []).map(a => reIdentify(a, mapping));
   }
@@ -72,6 +81,7 @@ export const analyzeGuidelines = async (
  * Generates a structured digest of a medical policy.
  */
 export const generatePolicyDigest = async (policyContent: string): Promise<PolicyDigest> => {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Summarize this medical policy into a structured digest for medical office staff. Focus on what is required to get an authorization approved. \n\nPOLICY:\n${policyContent}`,
@@ -98,6 +108,7 @@ export const generatePolicyDigest = async (policyContent: string): Promise<Polic
  * Generates a formal medical appeal letter using Gemini 3 Flash.
  */
 export const generateAppealLetter = async (request: AppealLetterRequest, useSecureMode: boolean = false): Promise<string> => {
+  const ai = getAI();
   let mapping: RedactionMapping = {};
   let req = { ...request };
 
@@ -152,6 +163,7 @@ export const generateAppealLetter = async (request: AppealLetterRequest, useSecu
  * Parses medical policy documents (PDF/Text) into structured data.
  */
 export const parsePolicyDocument = async (base64Data: string, mimeType: string): Promise<Partial<MedicalPolicy>> => {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: {
