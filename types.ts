@@ -104,3 +104,12 @@ export interface User {
   role: 'ADMIN' | 'PROVIDER' | 'BILLER';
   npi?: string;
 }
+
+export interface BuildManifest {
+  version: string;
+  features: {
+    id: string;
+    label: string;
+    status: 'Active' | 'Beta' | 'Legacy';
+  }[];
+}

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon } from 'lucide-react';
+import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon, Activity } from 'lucide-react';
 import { View } from '../types.ts';
 import { getDashboardStats, getHistory, ExtendedRecord } from '../services/historyService.ts';
 
@@ -28,14 +28,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-black text-slate-900">Practice Overview</h2>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Practice Overview</h2>
           <p className="text-slate-500">Live metrics from your organization's secure workstation.</p>
         </div>
         <div className="flex gap-2">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 text-[10px] font-black uppercase tracking-widest">
-            <Wifi size={12} /> Live Link
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-blue-400 text-[9px] font-black uppercase tracking-widest shadow-lg">
+            <Activity size={12} /> v2.8.4
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 text-[10px] font-black uppercase tracking-widest">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-[9px] font-black uppercase tracking-widest">
+            <Wifi size={12} /> Sync Active
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-xl text-blue-700 text-[9px] font-black uppercase tracking-widest">
             <Database size={12} /> BAA Secured
           </div>
         </div>
@@ -43,9 +46,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((stat, idx) => (
-          <div key={idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex items-start justify-between">
+          <div key={idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex items-start justify-between group hover:border-blue-200 transition-all">
             <div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{stat.label}</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 group-hover:text-blue-400 transition-colors">{stat.label}</p>
               <p className="text-3xl font-black text-slate-900">{stat.value}</p>
             </div>
             <div className={`p-3 rounded-2xl ${stat.bg} ${stat.color} shadow-inner`}>
@@ -60,11 +63,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <div className="flex items-center justify-between mb-8">
              <div className="flex items-center gap-3">
                <div className="p-2 bg-slate-900 text-white rounded-xl"><HistoryIcon size={20} /></div>
-               <h3 className="text-lg font-black text-slate-900">Recent Activity Log</h3>
+               <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Recent Activity Log</h3>
              </div>
             <button 
               onClick={() => onNavigate(View.HISTORY)}
-              className="text-blue-600 text-xs font-black uppercase tracking-widest hover:underline flex items-center gap-2"
+              className="text-blue-600 text-[10px] font-black uppercase tracking-widest hover:underline flex items-center gap-2"
             >
               Full History <ArrowUpRight size={14} />
             </button>
@@ -99,7 +102,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[32px]">
                 <Database size={40} className="mx-auto text-slate-200 mb-4" />
                 <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No workstation records found</p>
-                <p className="text-xs text-slate-300 mt-1">Initialize your first clinical analysis to start tracking.</p>
+                <p className="text-xs text-slate-300 mt-1 uppercase tracking-tighter font-black">Ready for Clinical Input</p>
               </div>
             )}
           </div>
@@ -111,7 +114,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center mb-8 backdrop-blur-md border border-white/20 shadow-inner">
               <Lock className="text-emerald-400" size={28} />
             </div>
-            <h3 className="text-2xl font-black mb-3">Secure Action</h3>
+            <h3 className="text-2xl font-black mb-3 uppercase tracking-tight">Secure Action</h3>
             <p className="text-slate-400 text-sm leading-relaxed mb-8 font-medium">
               Start a new HIPAA-compliant analysis or build an evidence-based appeal using Gemini's clinical reasoning.
             </p>
@@ -128,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               <div className="w-1 h-1 bg-slate-700 rounded-full"></div>
               <span>PHI-SAFE</span>
               <div className="w-1 h-1 bg-slate-700 rounded-full"></div>
-              <span>SOC2</span>
+              <span>SOC2-V2</span>
             </div>
           </div>
         </div>
