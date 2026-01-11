@@ -1,44 +1,54 @@
-import React from 'react';
-import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi } from 'lucide-react';
+
+import React, { useState, useEffect } from 'react';
+import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon } from 'lucide-react';
 import { View } from '../types.ts';
+import { getDashboardStats, getHistory, ExtendedRecord } from '../services/historyService.ts';
 
 interface DashboardProps {
   onNavigate: (view: View) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const stats = [
-    { label: 'Total Analyzed', value: '124', icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Risk Flags Found', value: '18', icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
-    { label: 'Appeals Generated', value: '42', icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { label: 'Approval Rate', value: '94%', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  const [stats, setStats] = useState(getDashboardStats());
+  const [recentHistory, setRecentHistory] = useState<ExtendedRecord[]>([]);
+
+  useEffect(() => {
+    setStats(getDashboardStats());
+    setRecentHistory(getHistory().slice(0, 5));
+  }, []);
+
+  const statCards = [
+    { label: 'Total Analyzed', value: stats.totalAnalyzed.toString(), icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Risk Flags Found', value: stats.riskFlags.toString(), icon: AlertCircle, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Appeals Generated', value: stats.appealsGenerated.toString(), icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { label: 'Approval Outlook', value: stats.approvalRate, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Practice Overview</h2>
-          <p className="text-slate-500">Monitor your authorization success and denial management.</p>
+          <h2 className="text-2xl font-black text-slate-900">Practice Overview</h2>
+          <p className="text-slate-500">Live metrics from your organization's secure workstation.</p>
         </div>
         <div className="flex gap-2">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 text-[10px] font-bold uppercase tracking-widest">
-            <Wifi size={12} /> Server: Secure
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-700 text-[10px] font-black uppercase tracking-widest">
+            <Wifi size={12} /> Live Link
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 text-[10px] font-bold uppercase tracking-widest">
-            <Database size={12} /> AES-256 Encrypted
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 text-[10px] font-black uppercase tracking-widest">
+            <Database size={12} /> BAA Secured
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, idx) => (
-          <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-start justify-between">
+        {statCards.map((stat, idx) => (
+          <div key={idx} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 flex items-start justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
-              <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{stat.label}</p>
+              <p className="text-3xl font-black text-slate-900">{stat.value}</p>
             </div>
-            <div className={`p-2 rounded-xl ${stat.bg} ${stat.color}`}>
+            <div className={`p-3 rounded-2xl ${stat.bg} ${stat.color} shadow-inner`}>
               <stat.icon size={24} />
             </div>
           </div>
@@ -46,62 +56,80 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-semibold text-slate-900">Compliance Audit History</h3>
-            <button className="text-blue-600 text-sm font-medium hover:underline flex items-center gap-1">
-              View Audit Logs <ArrowUpRight size={14} />
+        <div className="lg:col-span-2 bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-8">
+             <div className="flex items-center gap-3">
+               <div className="p-2 bg-slate-900 text-white rounded-xl"><HistoryIcon size={20} /></div>
+               <h3 className="text-lg font-black text-slate-900">Recent Activity Log</h3>
+             </div>
+            <button 
+              onClick={() => onNavigate(View.HISTORY)}
+              className="text-blue-600 text-xs font-black uppercase tracking-widest hover:underline flex items-center gap-2"
+            >
+              Full History <ArrowUpRight size={14} />
             </button>
           </div>
+          
           <div className="space-y-4">
-            {[
-              { patient: 'Sarah Jenkins', type: 'MRI Lumbar Spine', status: 'Likely Denied', date: '2h ago' },
-              { patient: 'Michael Chen', type: 'Cardiac Ablation', status: 'Approved', date: '5h ago' },
-              { patient: 'Robert Taylor', type: 'Tympanostomy', status: 'Likely Approved', date: '1d ago' },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-slate-50 hover:bg-slate-50 transition-colors">
+            {recentHistory.length > 0 ? recentHistory.map((item, i) => (
+              <div key={i} className="flex items-center justify-between p-5 rounded-[24px] border border-slate-50 hover:bg-slate-50/80 transition-all group">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-semibold">
-                    {item.patient[0]}
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs ${
+                    item.type === 'Appeal' ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-blue-600'
+                  }`}>
+                    {item.type[0]}
                   </div>
                   <div>
-                    <p className="font-medium text-slate-900">{item.patient}</p>
-                    <p className="text-sm text-slate-500">{item.type}</p>
+                    <p className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{item.patient || 'Clinical Record'}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mt-1">
+                      {item.type} • CPT {item.cpt || 'N/A'}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                    item.status === 'Likely Denied' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl ${
+                    item.status === 'Likely Denied' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
                   }`}>
                     {item.status}
                   </span>
-                  <p className="text-xs text-slate-400 mt-1">{item.date}</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-2 uppercase tracking-tighter">{item.date}</p>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[32px]">
+                <Database size={40} className="mx-auto text-slate-200 mb-4" />
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No workstation records found</p>
+                <p className="text-xs text-slate-300 mt-1">Initialize your first clinical analysis to start tracking.</p>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-8 rounded-2xl shadow-xl text-white flex flex-col justify-between border border-slate-700">
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-8 rounded-[40px] shadow-2xl text-white flex flex-col justify-between border border-slate-800 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-blue-500/20 transition-all duration-1000"></div>
           <div>
-            <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mb-6 backdrop-blur-sm border border-white/10">
-              <Lock className="text-emerald-400" size={24} />
+            <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center mb-8 backdrop-blur-md border border-white/20 shadow-inner">
+              <Lock className="text-emerald-400" size={28} />
             </div>
-            <h3 className="text-xl font-bold mb-2">Secure Workstation</h3>
-            <p className="text-slate-400 text-sm leading-relaxed mb-6">
-              All data processing is currently being performed on your organization's private VPC. PHI is de-identified before transport.
+            <h3 className="text-2xl font-black mb-3">Secure Action</h3>
+            <p className="text-slate-400 text-sm leading-relaxed mb-8 font-medium">
+              Start a new HIPAA-compliant analysis or build an evidence-based appeal using Gemini's clinical reasoning.
             </p>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
              <button 
               onClick={() => onNavigate(View.ANALYZER)}
-              className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-500 transition-colors shadow-lg"
+              className="w-full bg-blue-600 text-white font-black uppercase tracking-widest text-xs py-5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/40 border border-blue-400/30"
             >
-              Start Secure Analysis
+              Start Clinical Analysis
             </button>
-            <p className="text-[10px] text-center text-slate-500 uppercase font-bold tracking-widest">
-              NPI: 1234567890 • BAA Active
-            </p>
+            <div className="flex items-center justify-center gap-4 text-[9px] text-slate-500 uppercase font-black tracking-[0.2em]">
+              <span>AES-256</span>
+              <div className="w-1 h-1 bg-slate-700 rounded-full"></div>
+              <span>PHI-SAFE</span>
+              <div className="w-1 h-1 bg-slate-700 rounded-full"></div>
+              <span>SOC2</span>
+            </div>
           </div>
         </div>
       </div>

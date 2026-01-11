@@ -1,102 +1,122 @@
 
-import React from 'react';
-import { Search, Filter, MoreHorizontal, Download, Eye } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Filter, MoreHorizontal, Download, Eye, Database, Trash2 } from 'lucide-react';
+import { getHistory, clearHistory, ExtendedRecord } from '../services/historyService.ts';
 
 const History: React.FC = () => {
-  const records = [
-    { id: '1', date: 'Oct 24, 2023', patient: 'Alice Freeman', cpt: '72148', type: 'Analysis', status: 'Likely Denied' },
-    { id: '2', date: 'Oct 23, 2023', patient: 'Bob Smith', cpt: '99214', type: 'Appeal', status: 'Generated' },
-    { id: '3', date: 'Oct 23, 2023', patient: 'Charlie Day', cpt: '29881', type: 'Analysis', status: 'Approved' },
-    { id: '4', date: 'Oct 22, 2023', patient: 'Diana Ross', cpt: '11400', type: 'Analysis', status: 'Approved' },
-    { id: '5', date: 'Oct 20, 2023', patient: 'Edward Norton', cpt: '43239', type: 'Appeal', status: 'Generated' },
-  ];
+  const [records, setRecords] = useState<ExtendedRecord[]>([]);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    setRecords(getHistory());
+  }, []);
+
+  const handleClear = () => {
+    if (window.confirm("Permanent Action: This will clear ALL clinical history from this workstation. Proceed?")) {
+      clearHistory();
+      setRecords([]);
+    }
+  };
+
+  const filtered = records.filter(r => 
+    r.patient.toLowerCase().includes(search.toLowerCase()) || 
+    (r.cpt && r.cpt.includes(search))
+  );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Case History</h2>
-          <p className="text-slate-500">Access previous clinical analyses and appeal drafts.</p>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Case Registry</h2>
+          <p className="text-slate-500">Secure log of clinical analyses and appeal outcomes.</p>
         </div>
+        <button onClick={handleClear} className="px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-all flex items-center gap-2">
+          <Trash2 size={12} /> Wipe Registry
+        </button>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-          <div className="relative w-96">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+      <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-6 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
               type="text" 
-              placeholder="Search by patient name or CPT..."
-              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Search by patient, CPT, or result..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
             />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-            <Filter size={16} />
-            Filters
-          </button>
-        </div>
-
-        <table className="w-full text-left">
-          <thead>
-            <tr className="border-b border-slate-100">
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Date</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Patient</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">CPT Code</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Type</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Status</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {records.map((record) => (
-              <tr key={record.id} className="hover:bg-slate-50 transition-colors group">
-                <td className="px-6 py-4 text-sm text-slate-600">{record.date}</td>
-                <td className="px-6 py-4 text-sm font-semibold text-slate-900">{record.patient}</td>
-                <td className="px-6 py-4 text-sm text-slate-600 font-mono">{record.cpt}</td>
-                <td className="px-6 py-4 text-sm">
-                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                    record.type === 'Analysis' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'
-                  }`}>
-                    {record.type}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-sm">
-                  <span className={`flex items-center gap-1.5 text-xs font-bold ${
-                    record.status === 'Likely Denied' ? 'text-red-500' : 
-                    record.status === 'Approved' ? 'text-emerald-500' : 'text-slate-500'
-                  }`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${
-                      record.status === 'Likely Denied' ? 'bg-red-500' : 
-                      record.status === 'Approved' ? 'bg-emerald-500' : 'bg-slate-500'
-                    }`} />
-                    {record.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button className="p-2 hover:bg-slate-200 rounded-lg text-slate-600" title="View Details">
-                      <Eye size={16} />
-                    </button>
-                    <button className="p-2 hover:bg-slate-200 rounded-lg text-slate-600" title="Download PDF">
-                      <Download size={16} />
-                    </button>
-                    <button className="p-2 hover:bg-slate-200 rounded-lg text-slate-600">
-                      <MoreHorizontal size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-sm text-slate-500 font-medium">
-          <span>Showing 5 of 124 records</span>
           <div className="flex gap-2">
-            <button className="px-4 py-2 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg disabled:opacity-30">Previous</button>
-            <button className="px-4 py-2 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg">Next</button>
+            <div className="px-4 py-2 bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-widest rounded-xl border border-blue-100">
+              {records.length} Total Records
+            </div>
           </div>
         </div>
+
+        {filtered.length > 0 ? (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-slate-50">
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Timestamp</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Patient / ID</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">CPT</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Operation</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Workstation User</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filtered.map((record) => (
+                <tr key={record.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-8 py-6 text-[11px] font-bold text-slate-500 uppercase tracking-tight">{record.date}</td>
+                  <td className="px-8 py-6">
+                    <p className="font-bold text-slate-900">{record.patient || 'Anonymous Case'}</p>
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border mt-1 inline-block ${
+                      record.status === 'Likely Denied' ? 'bg-rose-50 text-rose-600 border-rose-100' : 
+                      record.status === 'Likely Approved' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-500 border-slate-100'
+                    }`}>
+                      {record.status}
+                    </span>
+                  </td>
+                  <td className="px-8 py-6 text-xs font-black text-slate-400 font-mono tracking-widest">{record.cpt || '---'}</td>
+                  <td className="px-8 py-6">
+                    <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                      record.type === 'Analysis' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'
+                    }`}>
+                      {record.type}
+                    </span>
+                  </td>
+                  <td className="px-8 py-6">
+                    <p className="text-xs font-bold text-slate-600 truncate max-w-[120px]">{record.userName}</p>
+                  </td>
+                  <td className="px-8 py-6 text-right">
+                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button className="p-2.5 hover:bg-white rounded-xl text-slate-400 hover:text-blue-600 shadow-sm border border-transparent hover:border-slate-100" title="View Details">
+                        <Eye size={16} />
+                      </button>
+                      <button className="p-2.5 hover:bg-white rounded-xl text-slate-400 hover:text-slate-900 shadow-sm border border-transparent hover:border-slate-100" title="Export Metadata">
+                        <Download size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="py-32 text-center">
+            <Database size={64} className="mx-auto text-slate-100 mb-6" />
+            <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Registry Empty</h3>
+            <p className="text-slate-400 text-sm mt-2 max-w-xs mx-auto font-medium">No clinical cases have been processed yet. Your activity will appear here automatically.</p>
+          </div>
+        )}
+
+        {filtered.length > 0 && (
+          <div className="p-6 border-t border-slate-50 bg-slate-50/30 flex items-center justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+            <span>Audit Trail Active • {filtered.length} Entries</span>
+          </div>
+        )}
       </div>
     </div>
   );

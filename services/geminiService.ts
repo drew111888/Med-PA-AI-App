@@ -3,16 +3,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping, PolicyDigest } from "../types.ts";
 import { deIdentify, reIdentify } from "./complianceService.ts";
 
-// Defensive API key retrieval
-const getApiKey = () => {
-  try {
-    return (window as any).process?.env?.API_KEY || "";
-  } catch {
-    return "";
-  }
-};
-
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
+// Standardized Gemini API initialization using process.env.API_KEY directly
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
  * Analyzes clinical notes against medical necessity guidelines using Gemini 3 Pro.
@@ -162,17 +154,19 @@ export const generateAppealLetter = async (request: AppealLetterRequest, useSecu
 export const parsePolicyDocument = async (base64Data: string, mimeType: string): Promise<Partial<MedicalPolicy>> => {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
-    contents: [
-      {
-        inlineData: {
-          mimeType: mimeType,
-          data: base64Data
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
+          }
+        },
+        {
+          text: "Extract the following details from this medical policy document: Carrier name, Policy Title, CPT Codes mentioned, any Medications mentioned, and a summary of the Clinical Necessity Guidelines."
         }
-      },
-      {
-        text: "Extract the following details from this medical policy document: Carrier name, Policy Title, CPT Codes mentioned, any Medications mentioned, and a summary of the Clinical Necessity Guidelines."
-      }
-    ],
+      ]
+    },
     config: {
       systemInstruction: "You are a medical data extraction expert. Extract structural information from insurance carrier policy documents and return it in a structured format.",
       responseMimeType: "application/json",
