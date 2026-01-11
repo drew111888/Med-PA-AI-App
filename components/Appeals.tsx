@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Send, Copy, Check, FileText, Loader2, Trash2, Download, 
   Lock, Sparkles, ChevronDown, BookMarked, Quote, FileUp, 
-  X, AlertCircle, Search, ClipboardList 
+  X, AlertCircle, Search, ClipboardList, Mail, Plus
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { generateAppealLetter, parsePolicyDocument } from '../services/geminiService.ts';
@@ -14,6 +14,10 @@ import { getPolicies } from '../services/policyService.ts';
 import { saveRecord } from '../services/historyService.ts';
 import { AppealLetterRequest, AppealType, PositionStatement, MedicalPolicy, PracticeBranding } from '../types.ts';
 
+/**
+ * Appeals component for building evidence-based medical appeal letters.
+ * Fixed to include full UI logic and default export.
+ */
 const Appeals: React.FC = () => {
   const [formData, setFormData] = useState<AppealLetterRequest>({
     patientName: '',
@@ -65,7 +69,6 @@ const Appeals: React.FC = () => {
             cptCode: result.cptCodes?.[0] || prev.cptCode 
           }));
         } else if (type === 'POLICY') {
-          // Inject policy info into clinical evidence or use it as a base
           setFormData(prev => ({
              ...prev,
              clinicalEvidence: `[GUIDELINE REFERENCE: ${result.title} (${result.carrier})]\n${result.content}\n\n${prev.clinicalEvidence}`.trim()
@@ -110,6 +113,13 @@ const Appeals: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEmail = () => {
+    if (!letter) return;
+    const subject = encodeURIComponent(`Appeal Draft: ${formData.patientName} (CPT: ${formData.cptCode})`);
+    const body = encodeURIComponent(letter);
+    window.location.href = `mailto:${branding.contactEmail || ''}?subject=${subject}&body=${body}`;
   };
 
   const downloadAsPDF = () => {
@@ -171,115 +181,134 @@ const Appeals: React.FC = () => {
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Insurance / CPT</label>
                 <div className="flex gap-2">
-                  <input type="text" value={formData.insuranceProvider} onChange={e => setFormData({...formData, insuranceProvider: e.target.value})} placeholder="Carrier" className="w-1/2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500" />
-                  <input type="text" value={formData.cptCode} onChange={e => setFormData({...formData, cptCode: e.target.value})} placeholder="CPT" className="w-1/2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input type="text" value={formData.insuranceProvider} onChange={e => setFormData({...formData, insuranceProvider: e.target.value})} placeholder="Carrier" className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input type="text" value={formData.cptCode} onChange={e => setFormData({...formData, cptCode: e.target.value})} placeholder="CPT" className="w-24 px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
                 </div>
               </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Denial Letter / Reason</label>
-                <button onClick={() => denialFileRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
-                  {parsingDoc === 'DENIAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
-                  Upload EOB/Denial
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Denial Reason / Letter</label>
+                <button onClick={() => denialFileRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest flex items-center gap-1">
+                   {parsingDoc === 'DENIAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />} Upload Denial
                 </button>
-                <input type="file" ref={denialFileRef} className="hidden" onChange={e => handleFileUpload(e, 'DENIAL')} accept=".pdf,.txt,.jpg,.png" />
+                <input type="file" ref={denialFileRef} className="hidden" onChange={e => handleFileUpload(e, 'DENIAL')} accept=".pdf,.txt" />
               </div>
-              <textarea rows={3} value={formData.denialReason} onChange={e => setFormData({...formData, denialReason: e.target.value})} placeholder="Paste exact denial text or upload a scan..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
+              <textarea rows={4} value={formData.denialReason} onChange={e => setFormData({...formData, denialReason: e.target.value})} placeholder="Paste carrier denial text or upload document..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clinical Supporting Evidence</label>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setShowAssetDrawer('STATEMENTS')} className="text-[9px] font-black text-emerald-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
-                    <Quote size={10} /> Practice Assets
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Clinical Evidence / Assets</label>
+                <div className="flex gap-4">
+                  <button onClick={() => setShowAssetDrawer('STATEMENTS')} className="text-[10px] font-black text-indigo-600 hover:underline uppercase tracking-widest flex items-center gap-1">
+                    <BookMarked size={10} /> Library
                   </button>
-                  <button onClick={() => policyFileRef.current?.click()} className="text-[9px] font-black text-amber-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
-                    {parsingDoc === 'POLICY' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
-                    Upload Guidelines
-                  </button>
-                  <button onClick={() => clinicalFileRef.current?.click()} className="text-[9px] font-black text-blue-600 hover:underline flex items-center gap-1 uppercase tracking-widest">
-                    {parsingDoc === 'CLINICAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />}
-                    Upload Clinicals
+                   <button onClick={() => clinicalFileRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest flex items-center gap-1">
+                    {parsingDoc === 'CLINICAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />} Records
                   </button>
                   <input type="file" ref={clinicalFileRef} className="hidden" onChange={e => handleFileUpload(e, 'CLINICAL')} accept=".pdf,.txt" />
-                  <input type="file" ref={policyFileRef} className="hidden" onChange={e => handleFileUpload(e, 'POLICY')} accept=".pdf,.txt" />
                 </div>
               </div>
-              <textarea rows={6} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Paste progress notes, guidlines, or upload records..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
+              <textarea rows={6} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Paste supporting clinical findings or inject from library..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
-            <button onClick={handleGenerate} disabled={loading} className="w-full py-5 bg-indigo-600 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 shadow-xl shadow-indigo-100 disabled:opacity-50">
+            <button onClick={handleGenerate} disabled={loading} className="w-full py-5 bg-blue-600 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl shadow-xl hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-3 transition-all">
               {loading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-              {loading ? 'Synthesizing Arguments...' : 'Generate Appeal Rebuttal'}
+              {loading ? 'Drafting Evidence-Based Appeal...' : 'Generate Clinical Appeal'}
             </button>
           </div>
         </div>
 
-        <div className="flex flex-col h-full relative">
-          {showAssetDrawer && (
-            <div className="absolute inset-0 bg-white/95 backdrop-blur-md z-50 rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-right-10 duration-500">
-               <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
-                  <h3 className="font-black text-sm uppercase tracking-widest flex items-center gap-2">
-                    {showAssetDrawer === 'STATEMENTS' ? <Quote size={18} /> : <BookMarked size={18} />}
-                    Select Evidence Asset
-                  </h3>
-                  <button onClick={() => setShowAssetDrawer(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
-               </div>
-               <div className="flex-1 overflow-y-auto p-6 space-y-3">
-                  {showAssetDrawer === 'STATEMENTS' ? (
-                    statements.length > 0 ? statements.map(s => (
-                      <button key={s.id} onClick={() => injectAsset(s.content)} className="w-full text-left p-5 hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all group">
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1 block">{s.category}</span>
-                        <p className="font-bold text-slate-900 text-sm mb-1">{s.title}</p>
-                        <p className="text-[10px] text-slate-400 line-clamp-2">{s.content}</p>
-                      </button>
-                    )) : (
-                      <div className="p-10 text-center text-slate-400">
-                        <Quote size={32} className="mx-auto mb-4 opacity-10" />
-                        <p className="text-xs font-bold uppercase tracking-widest">No Statements Provisioned</p>
-                      </div>
-                    )
-                  ) : (
-                    policies.map(p => (
-                      <button key={p.id} onClick={() => injectAsset(p.content)} className="w-full text-left p-5 hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all group">
-                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1 block">{p.carrier}</span>
-                        <p className="font-bold text-slate-900 text-sm">{p.title}</p>
-                      </button>
-                    ))
-                  )}
-               </div>
+        <div className="space-y-6">
+          {!letter && !loading ? (
+            <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-[40px]">
+              <FileText className="text-slate-200 mb-4" size={64} />
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Appeal Draft Output</h3>
+              <p className="text-slate-400 text-xs max-w-[200px] font-bold uppercase tracking-tighter mt-2">Generate a letter to see the evidence-based rebuttal here.</p>
             </div>
-          )}
-
-          {letter ? (
-            <div className="bg-white flex-1 rounded-[40px] shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
-              <div className="px-8 py-5 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Clinical Draft Output</span>
-                <div className="flex gap-2">
-                  <button onClick={downloadAsPDF} className="p-2.5 hover:bg-slate-200 rounded-xl text-slate-600 transition-all"><Download size={18} /></button>
-                  <button onClick={() => { navigator.clipboard.writeText(letter); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-2.5 hover:bg-slate-200 rounded-xl text-slate-600 transition-all">
-                    {copied ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 p-10 overflow-y-auto font-serif text-slate-800 leading-relaxed whitespace-pre-wrap text-sm border-x border-slate-50 mx-4">
-                {letter}
-              </div>
+          ) : loading ? (
+            <div className="bg-white p-16 rounded-[40px] border border-slate-100 shadow-2xl flex flex-col items-center justify-center text-center animate-pulse">
+              <Loader2 className="text-blue-500 animate-spin mb-6" size={48} />
+              <p className="text-sm font-black text-slate-900 uppercase tracking-widest">AI Drafting in Progress</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Synthesizing clinical evidence against carrier policy...</p>
             </div>
           ) : (
-            <div className="bg-slate-50/50 flex-1 rounded-[40px] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-12 text-center">
-              <ClipboardList size={48} className="mb-4 text-slate-200" />
-              <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Awaiting Build Inputs</p>
-              <p className="text-[10px] text-slate-300 mt-2 max-w-[200px] font-bold uppercase tracking-tighter leading-tight">
-                Upload denial, clinical records, and guidelines to synthesize a professional appeal draft.
-              </p>
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+               <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl relative">
+                  <div className="absolute top-8 right-8 flex gap-2">
+                    <button 
+                      onClick={() => { navigator.clipboard.writeText(letter); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                      className="p-3 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl border border-slate-100 transition-all"
+                    >
+                      {copied ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
+                    </button>
+                  </div>
+                  <div className="prose prose-slate max-w-none">
+                    <div className="flex items-center gap-3 mb-8 pb-8 border-b border-slate-50">
+                      <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                        <Quote size={24} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Medical Appeal Draft</h4>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Generated via clinical reasoning engine</p>
+                      </div>
+                    </div>
+                    <textarea 
+                      readOnly
+                      value={letter}
+                      className="w-full h-[500px] bg-transparent border-none focus:ring-0 text-sm font-medium leading-relaxed text-slate-700 resize-none outline-none"
+                    />
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-2 gap-4">
+                  <button onClick={downloadAsPDF} className="flex items-center justify-center gap-3 py-4 bg-slate-900 text-white font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-slate-800 transition-all shadow-xl shadow-slate-200">
+                    <Download size={16} /> Export as PDF
+                  </button>
+                  <button onClick={handleEmail} className="flex items-center justify-center gap-3 py-4 bg-white text-slate-900 border border-slate-200 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-slate-50 transition-all shadow-sm">
+                    <Mail size={16} /> Email to Provider
+                  </button>
+               </div>
             </div>
           )}
         </div>
       </div>
+
+      {showAssetDrawer === 'STATEMENTS' && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[80vh]">
+            <div className="p-8 bg-indigo-600 text-white flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-bold">Clinical Position Library</h3>
+                <p className="text-indigo-100 text-xs">Inject pre-approved clinical stances into your appeal.</p>
+              </div>
+              <button onClick={() => setShowAssetDrawer(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-4">
+                {statements.length > 0 ? statements.map(s => (
+                  <button key={s.id} onClick={() => injectAsset(s.content)} className="w-full text-left p-6 bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-3xl transition-all group">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="px-2 py-0.5 bg-white text-indigo-600 text-[9px] font-black uppercase rounded border border-indigo-100">{s.category}</span>
+                      <Plus size={14} className="text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 mb-1">{s.title}</h4>
+                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{s.content}</p>
+                  </button>
+                )) : (
+                  <div className="py-20 text-center">
+                    <BookMarked size={40} className="mx-auto text-slate-200 mb-4" />
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Library Empty</p>
+                    <p className="text-xs text-slate-300 mt-1">Add position statements in Practice Settings.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
