@@ -1,29 +1,45 @@
 
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon, Activity } from 'lucide-react';
+import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon, Activity, HelpCircle } from 'lucide-react';
 import { View } from '../types.ts';
 import { getDashboardStats, getHistory, ExtendedRecord } from '../services/historyService.ts';
-import { api, CaseSummary, HealthInfo, SummaryInfo } from '../services/apiClient.ts';
+import { api, isOk, type HealthInfo, type SummaryInfo, type ApiError } from '../services/apiClient.ts';
+import { describeDeadline } from '../services/deadlineView.ts';
 
 interface DashboardProps {
   onNavigate: (view: View) => void;
 }
 
+type HealthState =
+  | { phase: 'loading' }
+  | { phase: 'error'; error: ApiError }
+  | { phase: 'ready'; health: HealthInfo };
+
+type SummaryState =
+  | { phase: 'loading' }
+  | { phase: 'error'; error: ApiError }
+  | { phase: 'ready'; summary: SummaryInfo };
+
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [stats, setStats] = useState(getDashboardStats());
   const [recentHistory, setRecentHistory] = useState<ExtendedRecord[]>([]);
-  const [health, setHealth] = useState<HealthInfo | null>(null);
-  const [cases, setCases] = useState<CaseSummary[]>([]);
-  const [summary, setSummary] = useState<SummaryInfo | null>(null);
+  const [health, setHealth] = useState<HealthState>({ phase: 'loading' });
+  const [summary, setSummary] = useState<SummaryState>({ phase: 'loading' });
 
   useEffect(() => {
+    // Browser-local stat cards (out of scope — kept as-is).
     setStats(getDashboardStats());
     setRecentHistory(getHistory().slice(0, 5));
-    // Pull live backend status + cases + deadlines; degrade gracefully if offline.
-    api.health().then(setHealth).catch(() => setHealth(null));
-    api.listCases().then((d) => setCases(d.cases)).catch(() => setCases([]));
-    api.summary().then(setSummary).catch(() => setSummary(null));
+
+    // Live backend panels — explicit typed outcomes; errors are NOT collapsed to
+    // empty/zero but surfaced as distinct error states.
+    void api.health().then((r) => setHealth(isOk(r) ? { phase: 'ready', health: r.data } : { phase: 'error', error: r }));
+    void api.summary().then((r) => setSummary(isOk(r) ? { phase: 'ready', summary: r.data } : { phase: 'error', error: r }));
   }, []);
+
+  const h = health.phase === 'ready' ? health.health : null;
+  const cloudOff = h ? h.allowCloudAi === false : false;
+  const reviewReady = summary.phase === 'ready' ? summary.summary.packetsReady : null;
 
   const statCards = [
     { label: 'Total Analyzed', value: stats.totalAnalyzed.toString(), icon: ShieldCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -39,15 +55,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Practice Overview</h2>
           <p className="text-slate-500">Live metrics from your organization's secure workstation.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-blue-400 text-[9px] font-black uppercase tracking-widest shadow-lg">
             <Activity size={12} /> v2.8.4
           </div>
-          <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-xl text-[9px] font-black uppercase tracking-widest ${health ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
-            <Wifi size={12} /> {health ? `Local API ${health.db}` : 'API Offline'}
+          <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-xl text-[9px] font-black uppercase tracking-widest ${h ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
+            <Wifi size={12} /> {health.phase === 'loading' ? 'Checking…' : h ? `Local API ${h.db}` : 'API Offline'}
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-xl text-blue-700 text-[9px] font-black uppercase tracking-widest">
-            <Database size={12} /> {health ? `EHR: ${health.ehrAdapter}` : 'BAA Secured'}
+            <Database size={12} /> {h ? `EHR: ${h.ehrAdapter}` : 'EHR: unknown'}
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-xl text-[9px] font-black uppercase tracking-widest ${cloudOff ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-amber-50 border-amber-100 text-amber-700'}`}>
+            <Lock size={12} /> {h ? `AI: ${h.aiProvider} • ${cloudOff ? 'cloud-off' : 'cloud-on'}` : 'AI: unknown'}
           </div>
         </div>
       </div>
@@ -66,32 +85,86 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ))}
       </div>
 
-      {summary && summary.deadlines.length > 0 && (
+      {/* Backend operating mode — always visible when health resolved. */}
+      {h && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500">
+          <ShieldCheck size={13} className="text-emerald-500" />
+          Synthetic data • local-stub AI ({h.aiProvider}) • {cloudOff ? 'cloud AI OFF' : 'cloud AI ON'}
+        </div>
+      )}
+
+      {/* Summary error state — explicit, never a silent empty panel. */}
+      {summary.phase === 'error' && (
+        <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-700 text-xs font-bold">
+          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+          <div>
+            <p className="uppercase tracking-widest">Could not load summary ({summary.error.kind})</p>
+            <p className="font-medium mt-0.5">{summary.error.message}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Known deadlines (calculated from synthetic rule) — null-safe. */}
+      {summary.phase === 'ready' && (
         <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-amber-500 text-white rounded-xl"><AlertCircle size={20} /></div>
               <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Appeal Deadlines</h3>
             </div>
-            {summary.urgentDeadlines.length > 0 && (
+            {summary.summary.urgentDeadlines.length > 0 && (
               <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600">
-                {summary.urgentDeadlines.length} urgent (&le; 14 days)
+                {summary.summary.urgentDeadlines.length} urgent (&le; 14 days)
               </span>
             )}
           </div>
-          <div className="space-y-2">
-            {summary.deadlines.slice(0, 6).map((d) => (
-              <div key={d.caseId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-50 hover:bg-slate-50/60 transition-all">
-                <div className="flex items-center gap-3">
-                  <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${d.state === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{d.state.replace(/_/g, ' ')}</span>
-                  <span className="font-bold text-slate-900 text-sm">{d.denialId}</span>
-                </div>
-                <span className={`text-[11px] font-black uppercase tracking-widest ${d.daysRemaining <= 14 && d.state !== 'submitted' ? 'text-rose-600' : 'text-slate-500'}`}>
-                  {d.daysRemaining < 0 ? 'Past due' : `${d.daysRemaining}d`} • {d.appealDeadline}
-                </span>
+
+          {summary.summary.deadlines.filter((d) => d.deadlineKnown).length === 0 ? (
+            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest py-6 text-center">No calculated deadlines.</p>
+          ) : (
+            <div className="space-y-2">
+              {summary.summary.deadlines.filter((d) => d.deadlineKnown).slice(0, 6).map((d) => {
+                const dv = describeDeadline(d);
+                return (
+                  <div key={d.caseId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-50 hover:bg-slate-50/60 transition-all">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${d.state === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{d.state.replace(/_/g, ' ')}</span>
+                      <span className="font-bold text-slate-900 text-sm">{d.denialId}</span>
+                    </div>
+                    <span className={`text-[11px] font-black uppercase tracking-widest ${dv.urgent && d.state !== 'submitted' ? 'text-rose-600' : 'text-slate-500'}`}>
+                      {dv.urgencyLabel} • {d.appealDeadline}
+                      <span className="block text-[8px] text-slate-300 font-bold normal-case">calculated from synthetic rule</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Unknown deadlines — rendered SEPARATELY, never as a number. */}
+          {summary.summary.unknownDeadlines.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-slate-100">
+              <div className="flex items-center gap-2 mb-3">
+                <HelpCircle size={16} className="text-amber-500" />
+                <h4 className="text-[11px] font-black text-amber-700 uppercase tracking-widest">Deadline unknown — needs source</h4>
+                <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-amber-50 text-amber-700">{summary.summary.unknownDeadlines.length}</span>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2">
+                {summary.summary.unknownDeadlines.slice(0, 6).map((d) => {
+                  const dv = describeDeadline(d);
+                  return (
+                    <div key={d.caseId} className="flex items-center justify-between p-4 rounded-2xl border border-amber-50 bg-amber-50/40">
+                      <div className="flex items-center gap-3">
+                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-slate-100 text-slate-600">{d.state.replace(/_/g, ' ')}</span>
+                        <span className="font-bold text-slate-900 text-sm">{d.denialId}</span>
+                      </div>
+                      <span className="text-[10px] font-bold text-amber-800 text-right max-w-[55%]">{dv.detail}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -155,13 +228,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <p className="text-slate-400 text-sm leading-relaxed mb-8 font-medium">
               Review autonomous appeal cases or start a manual analysis. All processing runs on this local workstation.
             </p>
-            {cases.length > 0 && (
+            {summary.phase === 'ready' && (
               <div className="mb-6 p-4 bg-white/5 rounded-2xl border border-white/10">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Pipeline Cases</p>
-                <p className="text-3xl font-black text-white">{cases.length}</p>
+                <p className="text-3xl font-black text-white">{summary.summary.total}</p>
                 <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mt-1">
-                  {cases.filter((c) => c.packetReady).length} ready for review
+                  {reviewReady ?? 0} ready for review (packet_ready)
                 </p>
+              </div>
+            )}
+            {summary.phase === 'loading' && (
+              <div className="mb-6 p-4 bg-white/5 rounded-2xl border border-white/10">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading pipeline status…</p>
+              </div>
+            )}
+            {summary.phase === 'error' && (
+              <div className="mb-6 p-4 bg-rose-500/10 rounded-2xl border border-rose-400/20">
+                <p className="text-[9px] font-black text-rose-300 uppercase tracking-widest">Pipeline status unavailable</p>
               </div>
             )}
           </div>

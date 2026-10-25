@@ -1,14 +1,18 @@
 
 import React, { useState } from 'react';
-import { ShieldAlert, ShieldCheck, Lock, ExternalLink, Scale, User, Key, ChevronRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { signAgreement, authenticate } from '../services/authService.ts';
-import { User as UserType } from '../types.ts';
+import { ShieldCheck, Lock, Scale, User, Key, ChevronRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { useSession } from '../services/sessionContext.tsx';
 
-interface SecurityGatewayProps {
-  onAuthenticated: (user: UserType) => void;
-}
-
-const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) => {
+/**
+ * SecurityGateway — BAA acknowledgment + server-backed login.
+ *
+ * Authentication is delegated to the local backend (POST /api/auth/login) via
+ * the in-memory SessionProvider. No credentials are compared in the browser, no
+ * seeded dev credentials are embedded, and the password/token is never logged.
+ * The BAA acknowledgment remains a local UX gate before the login form.
+ */
+const SecurityGateway: React.FC = () => {
+  const session = useSession();
   const [agreed, setAgreed] = useState(false);
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
@@ -17,22 +21,26 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
 
-    // Artificial delay to simulate secure verification and prevent brute-force feeling
-    setTimeout(() => {
-      const user = authenticate(username, password);
-      if (user) {
-        signAgreement();
-        onAuthenticated(user);
-      } else {
-        setError("Invalid credentials. Please verify your username and password.");
-        setIsSubmitting(false);
-      }
-    }, 800);
+    const result = await session.login(username, password);
+    if (!('kind' in result)) {
+      // ok: true — the SessionProvider flips to authenticated; App swaps this screen out.
+      return;
+    }
+    // Distinct messages per outcome; never leak which field was wrong.
+    if (result.kind === 'serverError') {
+      setError('Cannot reach the local server. Confirm the workstation service is running.');
+    } else if (result.kind === 'badRequest') {
+      setError('Enter both a username and password.');
+    } else {
+      // 'unauthorized' or 'other'
+      setError('Invalid credentials. Please verify your username and password.');
+    }
+    setIsSubmitting(false);
   };
 
   return (
@@ -150,14 +158,8 @@ const SecurityGateway: React.FC<SecurityGatewayProps> = ({ onAuthenticated }) =>
           )}
 
           <div className="pt-6 border-t border-slate-100 flex flex-col items-center gap-4">
-            <a 
-              href="https://ai.google.dev/gemini-api/docs/billing" 
-              target="_blank" 
-              className="text-[10px] text-blue-600 hover:underline flex items-center gap-1.5 font-black uppercase tracking-widest"
-            >
-              Security Protocols & BAA <ExternalLink size={10} />
-            </a>
-            <p className="text-[10px] text-slate-300 font-medium">Practice Workstation V2.6 • HIPAA Secure Layer</p>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Local Workstation • HIPAA Secure Layer</p>
+            <p className="text-[10px] text-slate-300 font-medium">Practice Workstation V2.6</p>
           </div>
         </div>
       </div>
