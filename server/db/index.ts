@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppConfig } from '../config.ts';
-import { MIGRATIONS } from './migrations.ts';
+import { MIGRATIONS, runBackfill0005 } from './migrations.ts';
 
 // Load node:sqlite via runtime require so the bundler/test transformer never
 // tries to resolve the built-in specifier. `node:sqlite` is shipped with Node.
@@ -71,14 +71,46 @@ export const runMigrations = (db: Db): string[] => {
   const newlyApplied: string[] = [];
   const insert = db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)');
 
-  db.transaction(() => {
-    for (const migration of MIGRATIONS) {
-      if (applied.has(migration.id)) continue;
-      db.exec(migration.sql);
-      insert.run(migration.id, new Date().toISOString());
-      newlyApplied.push(migration.id);
-    }
-  });
+  // The 0004 rebuild DROPs/RENAMEs `denials` while `appeal_cases` holds an
+  // immediate FK to it. This is exactly the SQLite "safe table alter" case
+  // (sqlite.org/lang_altertable.html §7): FK enforcement must be disabled for
+  // the drop/rename, and integrity re-checked with foreign_key_check afterward.
+  // Two pragmas, both of which can ONLY change outside an active transaction:
+  //   - foreign_keys=OFF   so DROP TABLE denials does not trip the inbound FK
+  //                        from appeal_cases, and
+  //   - legacy_alter_table=ON  so the RENAME does not rewrite appeal_cases' FK
+  //                        text to "denials_new" (it stays pointing at
+  //                        "denials").
+  // We then run PRAGMA foreign_key_check INSIDE the transaction and throw on
+  // any orphan, forcing ROLLBACK, so a populated DB can never be left broken.
+  // The original pragma values are restored in finally.
+  db.exec('PRAGMA legacy_alter_table = ON;');
+  db.exec('PRAGMA foreign_keys = OFF;');
+  try {
+    db.transaction(() => {
+      for (const migration of MIGRATIONS) {
+        if (applied.has(migration.id)) continue;
+        if (migration.sql.trim().length > 0) db.exec(migration.sql);
+        // Data-dependent backfill for the semantic migration.
+        if (migration.id === '0005_backfill_semantics') runBackfill0005(db);
+        insert.run(migration.id, new Date().toISOString());
+        newlyApplied.push(migration.id);
+      }
+
+      // Integrity gate: if any FK is now dangling, abort the whole upgrade.
+      if (newlyApplied.length > 0) {
+        const violations = db.prepare('PRAGMA foreign_key_check').all();
+        if (violations.length > 0) {
+          throw new Error(
+            `Migration aborted: foreign_key_check found ${violations.length} violation(s)`,
+          );
+        }
+      }
+    });
+  } finally {
+    db.exec('PRAGMA legacy_alter_table = OFF;');
+    db.exec('PRAGMA foreign_keys = ON;');
+  }
   return newlyApplied;
 };
 

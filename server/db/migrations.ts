@@ -159,8 +159,25 @@ export const MIGRATIONS: Migration[] = [
     id: '0004_nullable_denial_date',
     sql: `
       -- denial_date must be NULLABLE: we never fabricate a date, so a denial
-      -- whose source omitted it is stored with NULL. Rebuild the table since
-      -- SQLite cannot drop a NOT NULL constraint in place.
+      -- whose source omitted it is stored with NULL. SQLite cannot drop a
+      -- NOT NULL constraint in place, so we rebuild the table using the
+      -- documented SQLite "safe table alter" sequence
+      -- (ref sqlite.org/lang_altertable.html §12 and lang_droptable.html):
+      -- create the replacement, copy rows, DROP the old table, RENAME the new
+      -- one into place, then recreate indexes.
+      --
+      -- WHY THIS IS SAFE ON A POPULATED DB WITH foreign_keys=ON:
+      -- appeal_cases.denial_id holds an immediate FK to denials. Dropping and
+      -- renaming denials would normally (a) trip an immediate FK check on DROP
+      -- and (b) rewrite appeal_cases' FK text to point at "denials_new" during
+      -- RENAME. runMigrations() mitigates both by wrapping this migration in a
+      -- transaction with PRAGMA legacy_alter_table=ON (so RENAME does NOT
+      -- rewrite child FK references, leaving them pointing at "denials"), and
+      -- by running PRAGMA foreign_key_check after all pending migrations and
+      -- rolling back if any orphan is found. Because denials_new is populated
+      -- from denials with identical ids BEFORE the drop/rename, every
+      -- appeal_cases.denial_id still resolves and foreign_key_check passes on
+      -- both empty and populated databases.
       CREATE TABLE denials_new (
         id TEXT PRIMARY KEY,
         claim_id TEXT NOT NULL,
@@ -182,4 +199,65 @@ export const MIGRATIONS: Migration[] = [
         ON denials(external_ref) WHERE external_ref IS NOT NULL;
     `,
   },
+  {
+    id: '0005_backfill_semantics',
+    // Data-dependent backfill is implemented in TS (runBackfill0005, invoked by
+    // runMigrations inside the gated transaction) because it has to read and
+    // rewrite per-row classification JSON. The SQL here is intentionally empty:
+    // the migration's effect is the TS backfill, and recording its id in
+    // schema_migrations keeps it idempotent (a second run skips it entirely).
+    sql: '',
+  },
 ];
+
+/**
+ * Semantic backfill for migration 0005. Idempotent and safe to run inside the
+ * migration transaction. Two concerns:
+ *
+ *  1. Legacy appeal_cases rows whose classification JSON predates the
+ *     deadlineStatus field: derive it WITHOUT fabricating anything — a deadline
+ *     is only "calculated" when the row already carries an appealDeadline;
+ *     otherwise it is "unknown_missing_date" (the date is the input we never
+ *     invent). We only add the key when it is absent, so re-running is a no-op.
+ *
+ *  2. Legacy rows marked 'submitted' with NO submission receipt evidence
+ *     (submission_receipt_enc IS NULL): generating a handoff is not submission,
+ *     and we must not fabricate a receipt. Demote them to 'handoff_generated',
+ *     a defined state that keeps deadline urgency open until a human records a
+ *     real receipt. Rows that DO carry a receipt are left untouched.
+ *
+ * Uses the raw statement surface available on Db (prepare/all/run). The
+ * submission_receipt_enc column exists because 0003 ran earlier in the same
+ * pending-migration batch (or was already applied).
+ */
+export const runBackfill0005 = (db: {
+  prepare(sql: string): { all(...p: unknown[]): any[]; run(...p: unknown[]): unknown };
+}): void => {
+  // 1. Backfill deadlineStatus into legacy classification JSON.
+  const rows = db
+    .prepare('SELECT id, classification FROM appeal_cases WHERE classification IS NOT NULL')
+    .all() as Array<{ id: string; classification: string }>;
+  const updateClassification = db.prepare(
+    'UPDATE appeal_cases SET classification = ? WHERE id = ?',
+  );
+  for (const row of rows) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(row.classification);
+    } catch {
+      continue; // leave unparseable legacy JSON alone
+    }
+    if (parsed && typeof parsed === 'object' && parsed.deadlineStatus === undefined) {
+      parsed.deadlineStatus = parsed.appealDeadline ? 'calculated' : 'unknown_missing_date';
+      updateClassification.run(JSON.stringify(parsed), row.id);
+    }
+  }
+
+  // 2. Demote legacy 'submitted' rows that have no recorded receipt. Generating
+  //    a handoff is not submission; we never fabricate a receipt.
+  db.prepare(
+    `UPDATE appeal_cases
+       SET state = 'handoff_generated'
+     WHERE state = 'submitted' AND submission_receipt_enc IS NULL`,
+  ).run();
+};
