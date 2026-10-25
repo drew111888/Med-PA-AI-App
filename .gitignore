@@ -28,7 +28,13 @@ data/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.demo-data/
 
 # Local env
 .env
 .env.local
+.env.*
+!.env.example

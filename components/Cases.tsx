@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import {
   api,
+  DEMO_MODE,
   isOk,
   type CaseSummary,
   type CaseDetail,
@@ -22,6 +23,7 @@ import { describeDeadline } from '../services/deadlineView.ts';
 import { createCaseDetailRequests } from '../services/caseDetailRequests.ts';
 import type { Capabilities } from '../services/capabilities.ts';
 import WorkflowRuns from './WorkflowRuns.tsx';
+import DemoFixtureIntake from './DemoFixtureIntake.tsx';
 
 /**
  * Cases — pipeline review + mutation screen (UI Wiring Packages 1–4).
@@ -67,7 +69,7 @@ const badge = (state: AppealCaseState): string => STATE_BADGE[state] ?? 'bg-slat
 const label = (s: string): string => s.replace(/_/g, ' ');
 
 const Cases: React.FC = () => {
-  const { capabilities } = useSession();
+  const { capabilities, refreshDemoSession } = useSession();
   const [list, setList] = useState<ListState>({ phase: 'loading' });
   const [detail, setDetail] = useState<DetailState>({ phase: 'idle' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -81,7 +83,8 @@ const Cases: React.FC = () => {
     const res = await api.listCases();
     if (isOk(res)) setList({ phase: 'ready', cases: res.data.cases });
     else setList({ phase: 'error', error: res }); // never collapse to empty
-  }, []);
+    if (DEMO_MODE && isOk(res)) void refreshDemoSession();
+  }, [refreshDemoSession]);
 
   // Summary refresh is part of the post-mutation reconciliation (detail+list+summary).
   const refreshSummary = useCallback(async () => {
@@ -100,9 +103,10 @@ const Cases: React.FC = () => {
       onResult: (caseId, res) => {
         if (isOk(res)) setDetail({ phase: 'ready', detail: res.data });
         else setDetail({ phase: 'error', id: caseId, error: res });
+        if (DEMO_MODE && isOk(res)) void refreshDemoSession();
       },
     });
-  }, []);
+  }, [refreshDemoSession]);
 
   useEffect(() => { void refresh(); void refreshSummary(); }, [refresh, refreshSummary]);
 
@@ -122,7 +126,8 @@ const Cases: React.FC = () => {
     });
     await Promise.all([openCase(id, true), refresh(), refreshSummary()]);
     setJobsRevision((revision) => revision + 1);
-  }, [openCase, refresh, refreshSummary]);
+    if (DEMO_MODE) await refreshDemoSession();
+  }, [openCase, refresh, refreshSummary, refreshDemoSession]);
 
   return (
     <div className="space-y-6 pb-20 animate-in fade-in duration-500">
@@ -146,7 +151,11 @@ const Cases: React.FC = () => {
       </div>
 
       {/* Pipeline run controls — synchronous drains, NOT async accepted jobs. */}
-      {capabilities.canRun && (
+      {DEMO_MODE && <DemoFixtureIntake onCompleted={async () => {
+        await Promise.all([refresh(), refreshSummary()]);
+        setJobsRevision((revision) => revision + 1);
+      }} />}
+      {!DEMO_MODE && capabilities.canRun && (
         <RunControls
           onRan={async () => {
             await Promise.all([refresh(), refreshSummary()]);
@@ -482,7 +491,7 @@ const CaseReview: React.FC<{
       ...(submittedAt.trim() ? { submittedAt: submittedAt.trim() } : {}),
       ...(note.trim() ? { note: note.trim() } : {}),
     };
-    const res = await api.recordSubmission(c.id, input);
+    const res = DEMO_MODE ? await api.recordDemoSubmission(c.id) : await api.recordSubmission(c.id, input);
     if (isOk(res)) {
       // Read back the stored, server-decrypted receipt (do not fabricate from audit).
       const rc = await api.getReceipt(c.id);
@@ -508,14 +517,15 @@ const CaseReview: React.FC<{
     setRetryPending(false);
   };
 
-  const submitFieldsValid = channel.trim() !== '' && confirmationNumber.trim() !== '';
-  const retryable = c.state === 'failed' || c.state === 'needs_more_data' || c.state === 'needs_review';
+  const submitFieldsValid = DEMO_MODE || (channel.trim() !== '' && confirmationNumber.trim() !== '');
+  const retryable = (c.state === 'failed' || c.state === 'needs_more_data' || c.state === 'needs_review') &&
+    (!DEMO_MODE || cls?.deadlineStatus === 'calculated');
 
   return (
-    <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-xl space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div className="flex items-start justify-between gap-3">
+    <div className="bg-white p-4 sm:p-8 rounded-3xl sm:rounded-[40px] border border-slate-100 shadow-xl space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+      <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight truncate">{c.id}</h3>
+          <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase tracking-tight break-all">{c.id}</h3>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
             {cls?.category ? label(cls.category) : 'uncategorized'} • {packet?.carrier ?? 'carrier unavailable'}
           </p>
@@ -618,7 +628,7 @@ const CaseReview: React.FC<{
               <FileText size={14} className="text-indigo-500" /> Draft appeal letter
             </p>
             <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${packet.aiValidationPassed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-              {packet.aiValidationPassed ? 'AI-validated' : 'Validation failed'}
+              {packet.aiValidationPassed ? (DEMO_MODE ? 'Stub output checks passed' : 'AI-validated') : 'Validation failed'}
             </span>
           </div>
           <textarea readOnly value={packet.draftLetter} className="w-full h-56 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs font-medium leading-relaxed outline-none resize-none" />
@@ -650,7 +660,7 @@ const CaseReview: React.FC<{
       {/* Patient / carrier / owner joins and task assignment are NOT provided by the backend. */}
       <div className="flex items-start gap-3 p-3 bg-slate-50 border border-slate-100 rounded-2xl text-slate-500 text-[10px] font-medium">
         <Info size={14} className="shrink-0 mt-0.5 text-slate-400" />
-        <p>Patient, carrier contact, owner, and task assignments are unavailable — the backend exposes no patient-join or task endpoints this increment.</p>
+        <p>{DEMO_MODE ? 'Fixed synthetic samples only. This workspace is not a patient-care tool; record labels and illustrative policy results are not verified carrier guidance.' : 'Patient, carrier contact, owner, and task assignments are unavailable — the backend exposes no patient-join or task endpoints this increment.'}</p>
       </div>
 
       {/* ===== Package 3 — Approval (versioned, human-review acknowledged) ===== */}
@@ -667,7 +677,7 @@ const CaseReview: React.FC<{
               onChange={(e) => setAcknowledged(e.target.checked)}
               className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
-            <span>I have reviewed this packet and approve version v{c.packetVersion} for submission.</span>
+            <span>{DEMO_MODE ? 'I have reviewed this synthetic packet and approve demo version v' : 'I have reviewed this packet and approve version v'}{c.packetVersion}{DEMO_MODE ? '. No delivery will occur.' : ' for submission.'}</span>
           </label>
           <button
             onClick={() => void handleApprove()}
@@ -739,11 +749,11 @@ const CaseReview: React.FC<{
       {capabilities.canRecordSubmission && (
         <div className="p-5 rounded-3xl border border-slate-200 bg-slate-50 space-y-3">
           <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-            <Send size={14} className="text-slate-600" /> Record submission receipt
+            <Send size={14} className="text-slate-600" /> {DEMO_MODE ? 'Synthetic receipt step' : 'Record submission receipt'}
           </p>
           <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-100 rounded-2xl text-amber-800 text-[10px] font-bold">
             <Info size={14} className="shrink-0 mt-0.5" />
-            <p>This records a HUMAN-ENTERED submission receipt — proof that a person transmitted the appeal out-of-band. It is NOT payer transmission and NOT independent payer confirmation.</p>
+            <p>{DEMO_MODE ? 'The server generates a fixed synthetic receipt for this sandbox. No text entry, payer transmission, or independent carrier confirmation occurs.' : 'This records a HUMAN-ENTERED submission receipt — proof that a person transmitted the appeal out-of-band. It is NOT payer transmission and NOT independent payer confirmation.'}</p>
           </div>
 
           {/* Existing recorded receipt (read-back from the server). */}
@@ -762,7 +772,7 @@ const CaseReview: React.FC<{
           {/* Entry form — enabled only once a handoff exists to submit. */}
           {c.state === 'handoff_generated' ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {DEMO_MODE ? <p className="text-sm text-slate-600">Choose Record synthetic receipt to save the server-generated demo reference. Do not send this sample artifact anywhere.</p> : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Channel (required)</label>
                   <select
@@ -808,14 +818,14 @@ const CaseReview: React.FC<{
                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-              </div>
+              </div>}
               <button
                 onClick={() => void handleRecordSubmission()}
                 disabled={!submitFieldsValid || submitPending}
                 className="w-full py-4 bg-slate-900 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all"
               >
                 {submitPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                {submitPending ? 'Recording…' : 'Record submission'}
+                {submitPending ? 'Recording…' : DEMO_MODE ? 'Record synthetic receipt' : 'Record submission'}
               </button>
               {submitError && <ErrorLine error={submitError} />}
             </div>
@@ -829,7 +839,7 @@ const CaseReview: React.FC<{
 
           {/* No authenticated packet-edit / version-invalidation API exists. */}
           <p className="text-[10px] text-slate-400 font-medium border-t border-slate-200 pt-2">
-            Requesting changes / revising the packet is not available: there is no authenticated packet-edit or version-invalidation API. Correct source data upstream and re-run the pipeline instead.
+            {DEMO_MODE ? 'Fixed samples cannot be edited. Select another catalog sample or reset your isolated demo to try another path.' : 'Requesting changes / revising the packet is not available: there is no authenticated packet-edit or version-invalidation API. Correct source data upstream and re-run the pipeline instead.'}
           </p>
         </div>
       )}
@@ -841,7 +851,7 @@ const CaseReview: React.FC<{
             <RotateCcw size={14} className="text-amber-600" /> Retry / re-run pipeline
           </p>
           <p className="text-[10px] text-slate-600 font-medium">
-            {c.state === 'failed'
+            {DEMO_MODE ? 'Re-runs the same server-owned synthetic record. This cannot supply missing evidence or grant approval. Per-case retry limits apply.' : c.state === 'failed'
               ? 'Re-runs the pipeline for this failed case to resume and repair it.'
               : 'Re-runs the pipeline for this case. There is no evidence or date-correction editor — correct the source data upstream, then re-run.'}
           </p>

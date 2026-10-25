@@ -1,0 +1,22 @@
+# Proposed single-instance demo packaging. Build on the host; never copy Mac
+# node_modules or an existing practice database into this image.
+FROM node:24-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+# TSX is currently a dev dependency and is the server's supported runtime.
+RUN npm ci --include=dev
+COPY . .
+RUN npm run build:demo
+ENV NODE_ENV=production \
+    MEDAUTH_PROFILE=synthetic \
+    MEDAUTH_HOST=0.0.0.0 \
+    MEDAUTH_CLIENT_DIST=/app/dist \
+    MEDAUTH_DEMO_DATA_DIR=/var/data/medpa-demo \
+    MEDAUTH_EHR_ADAPTER=synthetic \
+    MEDAUTH_PAYER_POLICY_ADAPTER=synthetic \
+    MEDAUTH_AI_PROVIDER=local \
+    MEDAUTH_ALLOW_CLOUD_AI=false
+# The stable encryption key must be supplied securely by the host. The demo
+# entry refuses startup without it; no default/live secret belongs in an image.
+EXPOSE 10000
+CMD ["node", "--import", "tsx", "server/demoIndex.ts"]

@@ -16,7 +16,9 @@
     "pretest": "npm run check:node",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:demo": "node scripts/buildDemo.mjs",
+    "start:demo": "npm run check:node && tsx server/demoIndex.ts"
   },
   "dependencies": {
     "react": "^19.2.3",

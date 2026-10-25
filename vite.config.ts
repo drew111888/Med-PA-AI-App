@@ -8,7 +8,10 @@ import react from '@vitejs/plugin-react';
 // before any outbound request. The client only knows the local API base URL.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
-  const apiBase = env.MEDAUTH_API_BASE || 'http://127.0.0.1:4000';
+  // A production/demo browser must call its own HTTPS origin. Only the local
+  // development proxy needs a loopback target; never bake it into a release.
+  const apiBase = env.MEDAUTH_API_BASE || '';
+  const demoMode = env.MEDAUTH_DEMO_MODE === 'true';
   return {
     server: {
       port: 3000,
@@ -16,7 +19,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // Forward API calls to the local backend during UI development.
         '/api': {
-          target: apiBase,
+          target: apiBase || 'http://127.0.0.1:4000',
           changeOrigin: true,
         },
       },
@@ -24,6 +27,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       'process.env.MEDAUTH_API_BASE': JSON.stringify(apiBase),
+      'process.env.MEDAUTH_DEMO_MODE': JSON.stringify(demoMode ? 'true' : 'false'),
     },
     resolve: {
       alias: {

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { View, User } from '../types.ts';
 import { canAccessView } from '../services/permissionsService.ts';
+import { DEMO_MODE } from '../services/apiClient.ts';
 
 interface SidebarProps {
   currentView: View;
@@ -31,7 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     { id: View.APPEALS, label: 'Appeal Builder', icon: FileText },
     { id: View.HISTORY, label: 'Case History', icon: History },
     { id: View.USER_MANAGEMENT, label: 'User Management', icon: Users },
-  ].filter(item => canAccessView(user, item.id));
+  ].filter(item => canAccessView(user, item.id) && (!DEMO_MODE || item.id === View.DASHBOARD || item.id === View.CASES));
 
   // Safe split for initials
   const initials = (user?.name || 'User Account')
@@ -43,16 +44,16 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
     .slice(0, 2);
 
   return (
-    <div className="w-64 h-full bg-slate-900 text-slate-300 flex flex-col fixed left-0 top-0 border-r border-slate-800 z-50 shadow-2xl">
-      <div className="p-6">
-        <div className="flex items-center gap-3 mb-8">
+    <aside className={`w-full lg:w-64 lg:h-full shrink-0 bg-slate-900 text-slate-300 flex flex-col ${DEMO_MODE ? 'lg:static' : 'lg:fixed lg:left-0 lg:top-0'} border-r border-slate-800 z-50 shadow-2xl`}>
+      <div className="p-4 lg:p-6">
+        <div className="flex items-center gap-3 mb-3 lg:mb-8">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <ShieldCheck className="text-white" size={20} />
           </div>
-          <h1 className="text-xl font-black tracking-tight text-white uppercase tracking-wider">MedAuth AI</h1>
+          <p className="text-xl font-black tracking-tight text-white uppercase tracking-wider">{DEMO_MODE ? 'MedAuth demo' : 'MedAuth AI'}</p>
         </div>
 
-        <div className="p-4 bg-slate-800/50 rounded-[20px] border border-slate-700/50 mb-6">
+        <div className="hidden lg:block p-4 bg-slate-800/50 rounded-[20px] border border-slate-700/50 mb-6">
           <div className="flex items-center gap-3 mb-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shadow-inner ${
               user?.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 
@@ -71,29 +72,31 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
             onClick={onLogout}
             className="w-full py-2 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-all flex items-center justify-center gap-2 border border-slate-700"
           >
-            <LogOut size={12} /> Sign Out
+            <LogOut size={12} /> {DEMO_MODE ? 'Leave demo' : 'Sign Out'}
           </button>
         </div>
+        <p className="lg:hidden text-sm">{user.name} · {user.role} {DEMO_MODE ? '· synthetic sandbox' : ''}</p>
       </div>
       
-      <nav className="flex-1 px-3 space-y-1">
+      <nav aria-label="Workspace navigation" className="flex lg:flex-col lg:flex-1 px-3 pb-3 lg:pb-0 gap-2 overflow-x-auto lg:overflow-visible">
         {navItems.map((item) => (
           <button
             key={item.id}
             onClick={() => onNavigate(item.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 ${
+            aria-current={currentView === item.id ? 'page' : undefined}
+            className={`shrink-0 lg:w-full flex items-center gap-3 px-4 py-3 min-h-11 rounded-xl text-sm font-bold transition-all duration-200 ${
               currentView === item.id 
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' 
                 : 'hover:bg-slate-800 hover:text-white'
             }`}
           >
             <item.icon size={18} />
-            {item.label}
+            {DEMO_MODE && item.id === View.CASES ? 'Cases & workflows' : item.label}
           </button>
         ))}
       </nav>
 
-      <div className="p-4 border-t border-slate-800/50">
+      {!DEMO_MODE && <div className="p-4 border-t border-slate-800/50">
         <button 
           onClick={() => onNavigate(View.SETTINGS)}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 ${
@@ -103,8 +106,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogo
           <LucideSettings size={18} />
           Practice Settings
         </button>
-      </div>
-    </div>
+      </div>}
+    </aside>
   );
 };
 

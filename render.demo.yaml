@@ -1,0 +1,24 @@
+# Proposed resources only. Do not sync until paid-resource AND secret approval.
+# Select Provider Platform (tea-dakk93942hec73asmhkg) explicitly in Render.
+previews:
+  generation: "off"
+services:
+  - type: web
+    name: med-pa-synthetic-demo
+    runtime: docker
+    repo: https://github.com/drew111888/Med-PA-AI-App
+    branch: codex/hosted-synthetic-demo
+    region: oregon
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    dockerfilePath: ./Dockerfile.demo
+    dockerContext: .
+    healthCheckPath: /api/health
+    disk:
+      name: med-pa-demo-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: MEDAUTH_DEMO_ENCRYPTION_KEY
+        generateValue: true

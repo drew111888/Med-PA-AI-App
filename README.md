@@ -1,3 +1,5 @@
+> This branch contains the isolated synthetic application demo. See [DEMO_RELEASE.md](DEMO_RELEASE.md) for startup/hosting boundaries and [DEMO_ACCEPTANCE.md](DEMO_ACCEPTANCE.md) for executed tests. Use the demo entry, not the ordinary practice server, for public testing. Never enter real patient data.
+
 # MedAuth AI — Local-First Autonomous Denial Appeal System
 
 A self-hosted system that turns insurance denials into appeal packets. It detects

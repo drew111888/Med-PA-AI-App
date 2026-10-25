@@ -14,7 +14,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw, AlertCircle, Workflow } from 'lucide-react';
-import { api, isOk, type JobRow, type ApiError } from '../services/apiClient.ts';
+import { api, DEMO_MODE, isOk, type JobRow, type ApiError } from '../services/apiClient.ts';
 
 type LoadState =
   | { phase: 'loading' }
@@ -56,7 +56,7 @@ const WorkflowRuns: React.FC<{ refreshKey?: number }> = ({ refreshKey = 0 }) => 
           <div className="p-2 bg-slate-900 text-white rounded-xl"><Workflow size={18} /></div>
           <div>
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">Workflow Runs</h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global pipeline job queue</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{DEMO_MODE ? 'This sandbox’s pipeline jobs' : 'Global pipeline job queue'}</p>
           </div>
         </div>
         <button

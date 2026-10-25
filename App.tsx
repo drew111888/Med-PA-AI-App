@@ -12,7 +12,10 @@ import UserManagement from './components/UserManagement.tsx';
 import PracticeSettings from './components/PracticeSettings.tsx';
 import { View, User } from './types.ts';
 import { SessionProvider, useSession } from './services/sessionContext.tsx';
-import type { SessionUser } from './services/apiClient.ts';
+import { DEMO_MODE, type SessionUser } from './services/apiClient.ts';
+import DemoGateway, { DemoNotice } from './components/DemoGateway.tsx';
+import DemoControls from './components/DemoControls.tsx';
+import DemoDashboard from './components/DemoDashboard.tsx';
 
 /**
  * Map the server session user onto the browser `User` shape the legacy Sidebar
@@ -28,9 +31,15 @@ const toUser = (u: SessionUser): User => ({
 
 const AuthenticatedApp: React.FC<{ user: User; onLogout: () => void }> = ({ user, onLogout }) => {
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
+  const { refreshDemoSession } = useSession();
+  const navigate = (view: View) => {
+    setCurrentView(DEMO_MODE && view !== View.DASHBOARD ? View.CASES : view);
+    if (DEMO_MODE) void refreshDemoSession();
+  };
 
   const renderView = () => {
     try {
+      if (DEMO_MODE) return currentView === View.DASHBOARD ? <DemoDashboard onNavigate={navigate} /> : <Cases />;
       switch (currentView) {
         case View.DASHBOARD:
           return <Dashboard onNavigate={setCurrentView} />;
@@ -72,18 +81,22 @@ const AuthenticatedApp: React.FC<{ user: User; onLogout: () => void }> = ({ user
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans antialiased text-slate-900">
+    <div className={`${DEMO_MODE ? 'flex flex-col h-dvh overflow-hidden' : 'flex flex-col lg:flex-row min-h-screen lg:h-screen lg:overflow-hidden'} bg-slate-50 font-sans antialiased text-slate-900`}>
+      {DEMO_MODE && <DemoNotice />}
+      <div className={DEMO_MODE ? 'flex flex-col lg:flex-row flex-1 min-h-0 overflow-y-auto lg:overflow-hidden' : 'contents'}>
       <Sidebar
         currentView={currentView}
-        onNavigate={setCurrentView}
+        onNavigate={navigate}
         user={user}
         onLogout={onLogout}
       />
-      <main className="flex-1 ml-64 overflow-y-auto p-8 bg-slate-50/50">
+      <main className={`flex-1 min-w-0 ${DEMO_MODE ? '' : 'lg:ml-64'} lg:overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-50/50`}>
         <div className="max-w-6xl mx-auto min-h-full">
+          {DEMO_MODE && <DemoControls showNotice={false} onShowCases={() => navigate(View.CASES)} />}
           {renderView()}
         </div>
       </main>
+      </div>
     </div>
   );
 };
@@ -103,10 +116,10 @@ const AppShell: React.FC = () => {
   }
 
   if (!session.isAuthenticated || !session.user) {
-    return <SecurityGateway />;
+    return DEMO_MODE ? <DemoGateway /> : <SecurityGateway />;
   }
 
-  return <AuthenticatedApp user={toUser(session.user)} onLogout={() => void session.logout()} />;
+  return <AuthenticatedApp key={DEMO_MODE ? `${session.demoSession?.sandboxId}:${session.contextVersion}` : 'app'} user={toUser(session.user)} onLogout={() => DEMO_MODE ? session.leaveDemo() : void session.logout()} />;
 };
 
 const App: React.FC = () => (

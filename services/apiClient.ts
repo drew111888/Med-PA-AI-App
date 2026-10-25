@@ -14,13 +14,14 @@
  * Title: Lead BSA, SDIT Architecture
  */
 
-const BASE = (typeof process !== 'undefined' && (process as any).env?.MEDAUTH_API_BASE) || '';
+export const DEMO_MODE = process.env.MEDAUTH_DEMO_MODE === 'true';
+const BASE = DEMO_MODE ? '' : ((typeof process !== 'undefined' && (process as any).env?.MEDAUTH_API_BASE) || '');
 
 // --- Session wiring (injected by the SessionProvider; no localStorage) ---
 
 type TokenGetter = () => string | null;
 let tokenGetter: TokenGetter = () => null;
-let onUnauthorized: (() => void) | null = null;
+let onUnauthorized: ((error?: ApiError, requestToken?: string | null) => void) | null = null;
 
 /** Register how request() obtains the current bearer token (in-memory). */
 export const setAuthTokenGetter = (fn: TokenGetter): void => {
@@ -28,7 +29,7 @@ export const setAuthTokenGetter = (fn: TokenGetter): void => {
 };
 
 /** Register a handler invoked on any 401 so the session can end + route to login. */
-export const setOnUnauthorized = (fn: (() => void) | null): void => {
+export const setOnUnauthorized = (fn: ((error?: ApiError, requestToken?: string | null) => void) | null): void => {
   onUnauthorized = fn;
 };
 
@@ -40,6 +41,8 @@ export type ApiErrorKind =
   | 'badRequest' // 400 — input validation
   | 'notFound' // 404 — missing resource
   | 'conflict' // 409 — stale / state conflict
+  | 'rateLimited' // 429 — bounded public demo capacity or action limit
+  | 'expired' // demo sandbox expired; start a fresh isolated session
   | 'serverError'; // network failure or 5xx
 
 export interface ApiError {
@@ -47,6 +50,8 @@ export interface ApiError {
   kind: ApiErrorKind;
   status: number;
   message: string;
+  code?: string;
+  retryAfter?: number;
 }
 
 export type ApiResult<T> = { ok: true; data: T } | ApiError;
@@ -67,6 +72,10 @@ const errorMessage = (kind: ApiErrorKind, status: number, bodyError?: string): s
       return 'The requested resource was not found.';
     case 'conflict':
       return 'The resource changed or is in a conflicting state.';
+    case 'rateLimited':
+      return 'The demo is at its limit. Please wait before trying again.';
+    case 'expired':
+      return 'This demo session expired. Start a fresh synthetic workspace.';
     case 'serverError':
     default:
       return status === 0
@@ -81,6 +90,7 @@ const kindForStatus = (status: number): ApiErrorKind => {
   if (status === 400) return 'badRequest';
   if (status === 404) return 'notFound';
   if (status === 409) return 'conflict';
+  if (status === 429) return 'rateLimited';
   return 'serverError'; // any other non-2xx (incl. 5xx)
 };
 
@@ -102,10 +112,8 @@ const request = async <T>(path: string, init: RequestInit = {}, opts: RequestOpt
     'content-type': 'application/json',
     ...((init.headers as Record<string, string>) ?? {}),
   };
-  if (!opts.anonymous) {
-    const token = tokenGetter();
-    if (token) headers['authorization'] = `Bearer ${token}`;
-  }
+  const requestToken = opts.anonymous ? null : tokenGetter();
+  if (requestToken) headers['authorization'] = `Bearer ${requestToken}`;
 
   let res: Response;
   try {
@@ -120,10 +128,13 @@ const request = async <T>(path: string, init: RequestInit = {}, opts: RequestOpt
     return { ok: true, data };
   }
 
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  const kind = kindForStatus(res.status);
-  if (kind === 'unauthorized' && onUnauthorized) onUnauthorized();
-  return { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error) };
+  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; retryAfter?: number };
+  const kind = DEMO_MODE && (res.status === 401 || (res.status === 403 && /expir/i.test(body.code || body.error || '')))
+    ? 'expired' : kindForStatus(res.status);
+  const error: ApiError = { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error),
+    ...(body.code ? { code: body.code } : {}), ...(body.retryAfter != null ? { retryAfter: body.retryAfter } : {}) };
+  if (!opts.anonymous && requestToken === tokenGetter() && (kind === 'unauthorized' || kind === 'expired') && onUnauthorized) onUnauthorized(error, requestToken);
+  return error;
 };
 
 // --- Types mirrored EXACTLY from the backend source of truth ---
@@ -144,6 +155,24 @@ export interface LoginResponse {
   token: string;
   user: SessionUser;
   expiresAt: string;
+}
+
+export type DemoRole = 'PROVIDER' | 'BILLER';
+export interface DemoFixture { id: string; label: string; description: string }
+export interface DemoSessionInfo {
+  user: SessionUser;
+  expiresAt: string;
+  idleExpiresAt: string;
+  sandboxId: string;
+  fixtures: DemoFixture[];
+  limits: { maxSandboxes: number; ttlMinutes: number; idleMinutes: number; maxPolls: number; maxRetriesPerCase: number };
+}
+export interface DemoSessionResponse extends DemoSessionInfo { token: string }
+export interface DemoIntakeResult {
+  jobId: string;
+  caseId: string | null;
+  state: AppealCaseState | null;
+  denial?: unknown;
 }
 
 export type DeadlineStatus = 'calculated' | 'unknown_missing_date' | 'unknown_missing_policy';
@@ -405,17 +434,25 @@ const downloadHandoff = async (id: string): Promise<ApiResult<Blob>> => {
     return { ok: true, data: blob };
   }
 
-  const kind = kindForStatus(res.status);
-  if (kind === 'unauthorized' && onUnauthorized) onUnauthorized();
   // Best-effort error message from the JSON body (may not be JSON on a download path).
-  const body = (await res.json().catch(() => ({}))) as { error?: string };
-  return { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error) };
+  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  const kind = DEMO_MODE && (res.status === 401 || (res.status === 403 && /expir/i.test(body.code || body.error || '')))
+    ? 'expired' : kindForStatus(res.status);
+  const error: ApiError = { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error) };
+  if (token === tokenGetter() && (kind === 'unauthorized' || kind === 'expired') && onUnauthorized) onUnauthorized(error, token);
+  return error;
 };
 
 // --- API surface: reads + auth (Pkg 1&2) + mutations/runs (Pkg 3&4) ---
 // The server derives the audit actor from the token; NO method ever sends `actor`.
 
 export const api = {
+  demoStart: (role: DemoRole) => request<DemoSessionResponse>('/demo/start', { method: 'POST', body: JSON.stringify({ role }) }, { anonymous: true }),
+  demoChangeRole: (role: DemoRole) => request<DemoSessionResponse>('/demo/role', { method: 'POST', body: JSON.stringify({ role }) }),
+  demoReset: () => request<DemoSessionResponse>('/demo/reset', { method: 'POST', body: '{}' }),
+  demoSession: () => request<DemoSessionInfo>('/demo/session'),
+  demoIntake: (fixtureId: string) => request<DemoIntakeResult>(`/demo/intake/${encodeURIComponent(fixtureId)}`, { method: 'POST', body: '{}' }),
+  recordDemoSubmission: (id: string) => request<{ ok: true; caseId: string; state: 'submitted' }>(`/cases/${encodeURIComponent(id)}/submit`, { method: 'POST', body: '{}' }),
   // Public (no bearer).
   health: () => request<HealthInfo>('/health', {}, { anonymous: true }),
   login: (username: string, password: string) =>
