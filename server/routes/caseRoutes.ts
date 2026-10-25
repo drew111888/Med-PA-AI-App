@@ -16,6 +16,8 @@ import type { EHRPort } from '../ports/ehrPort.ts';
 import type { UserRepository } from '../auth/userRepository.ts';
 import { requireAuth, requirePermission } from '../auth/middleware.ts';
 import { intakeDenialFromPdf } from '../intake/denialIntake.ts';
+import { processDenial } from '../pipeline/orchestrator.ts';
+import type { Denial } from '../domain/types.ts';
 import {
   generateHandoff,
   recordSubmission,
@@ -26,7 +28,12 @@ import { OPEN_FOR_DEADLINE, type AppealCaseState } from '../domain/types.ts';
 
 export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRepository): Router => {
   const router = Router();
-  const { cases, audit, jobs, ai } = services;
+  const { cases, audit, jobs, ai, orchestratorDeps } = services;
+
+  // States from which a case may be re-run (resumed/repaired). Mirrors the
+  // orchestrator RESUMABLE set's human-actionable subset: a failed run plus the
+  // two deterministic "held" states a human may retry after remediation.
+  const RETRYABLE = new Set(['failed', 'needs_more_data', 'needs_review']);
 
   // All case routes require authentication.
   router.use(requireAuth(users));
@@ -91,6 +98,38 @@ export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRe
     }
     audit.log({ caseId: c.id, actor: req.authUser!.id, action: 'approved', detail: `v${expectedVersion}` });
     res.json({ ok: true, state: 'approved', approvedVersion: expectedVersion });
+  });
+
+  // --- Retry a resumable/held case (run_pipeline) ---
+
+  // Re-runs the pipeline for a case stuck in failed / needs_more_data /
+  // needs_review. The orchestrator's resume path repairs the EXISTING case (and
+  // re-inserts the denial idempotently on its id), so no duplicate denial/case
+  // rows are created. The denial carries idempotency key denial:<id>, so no
+  // duplicate job rows are created either.
+  router.post('/cases/:id/retry', requirePermission('run_pipeline'), async (req, res, next) => {
+    try {
+      const c = cases.getCase(req.params.id);
+      if (!c) return res.status(404).json({ error: 'case not found' });
+      if (!RETRYABLE.has(c.state)) {
+        return res.status(409).json({ error: `cannot retry from state ${c.state}` });
+      }
+
+      // Resolve the underlying denial for this case (synthetic/local source).
+      const denials = await ehr.discoverDenials();
+      const denial: Denial | undefined = denials.find((d) => d.id === c.denialId);
+      if (!denial) {
+        return res.status(409).json({ error: `denial ${c.denialId} is no longer discoverable; cannot retry` });
+      }
+
+      // Re-run through the orchestrator directly: its resume branch updates the
+      // existing case rather than creating a second one, and insertDenial is
+      // idempotent on the denial id (no PRIMARY KEY violation, no duplicate).
+      const result = await processDenial(orchestratorDeps, denial);
+      res.json({ caseId: result.caseId, state: result.state, packetReady: result.packetReady });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // --- Pipeline runs (run_pipeline) ---

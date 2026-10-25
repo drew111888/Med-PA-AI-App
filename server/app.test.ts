@@ -243,6 +243,71 @@ describe('handoff vs submission are distinct steps', () => {
   });
 });
 
+describe('POST /api/cases/:id/retry (FEAT-002)', () => {
+  it('requires run_pipeline and 404s for a missing case', async () => {
+    const { app } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      const r = await req(base, 'POST', '/api/cases/case_does_not_exist/retry', { token, body: {} });
+      expect(r.status).toBe(404);
+    });
+  });
+
+  it('409s when the case is not in a resumable/held state', async () => {
+    const { app } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      // den_001 -> packet_ready (not retryable).
+      await req(base, 'POST', '/api/run/denial/den_001', { token, body: {} });
+      const r = await req(base, 'POST', '/api/cases/case_den_001/retry', { token, body: {} });
+      expect(r.status).toBe(409);
+    });
+  });
+
+  it('retries a needs_more_data case with no duplicate denial/case rows', async () => {
+    const { app, ctx } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      // den_003 lands in needs_more_data (sparse chart).
+      await req(base, 'POST', '/api/run/denial/den_003', { token, body: {} });
+      const before = await req(base, 'GET', '/api/cases/case_den_003', { token });
+      expect(before.body.case.state).toBe('needs_more_data');
+
+      const retry = await req(base, 'POST', '/api/cases/case_den_003/retry', { token, body: {} });
+      expect(retry.status).toBe(200);
+      // Deterministic re-run of a sparse chart lands in needs_more_data again,
+      // but it did not throw and repaired/updated the same case.
+      expect(retry.body.state).toBe('needs_more_data');
+
+      // Exactly one denial row and one appeal_case row for this denial.
+      const denialCount = (ctx.db.prepare('SELECT COUNT(*) c FROM denials WHERE id=?').get('den_003') as any).c;
+      const caseCount = (ctx.db.prepare('SELECT COUNT(*) c FROM appeal_cases WHERE denial_id=?').get('den_003') as any).c;
+      expect(denialCount).toBe(1);
+      expect(caseCount).toBe(1);
+    });
+  });
+
+  it('retries a failed case and repairs it to a non-failed state with no duplicates', async () => {
+    const { app, ctx } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      // Produce a real case, then force it to failed to simulate a broken run.
+      await req(base, 'POST', '/api/run/denial/den_001', { token, body: {} });
+      ctx.db.prepare("UPDATE appeal_cases SET state='failed' WHERE id='case_den_001'").run();
+
+      const retry = await req(base, 'POST', '/api/cases/case_den_001/retry', { token, body: {} });
+      expect(retry.status).toBe(200);
+      expect(retry.body.state).not.toBe('failed');
+      expect(retry.body.state).toBe('packet_ready');
+
+      const denialCount = (ctx.db.prepare('SELECT COUNT(*) c FROM denials WHERE id=?').get('den_001') as any).c;
+      const caseCount = (ctx.db.prepare('SELECT COUNT(*) c FROM appeal_cases WHERE denial_id=?').get('den_001') as any).c;
+      expect(denialCount).toBe(1);
+      expect(caseCount).toBe(1);
+    });
+  });
+});
+
 describe('PDF intake with a missing date surfaces UNKNOWN deadline (never fabricated)', () => {
   it('produces needs_review (incomplete) with deadlineStatus unknown_missing_date', async () => {
     const { app } = testApp();

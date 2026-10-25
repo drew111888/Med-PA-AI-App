@@ -48,7 +48,16 @@ export const processDenial = async (
   // reprocessed. But a 'failed' case (or one left mid-flight by a crash) MUST be
   // resumed/repaired rather than reported as success.
   const existing = cases.getCaseByDenial(denial.id);
-  const RESUMABLE = new Set(['failed', 'intake', 'classified', 'gathering', 'gated', 'reasoning']);
+  const RESUMABLE = new Set([
+    'failed',
+    'intake',
+    'classified',
+    'gathering',
+    'gated',
+    'reasoning',
+    'needs_more_data',
+    'needs_review',
+  ]);
   if (existing && !RESUMABLE.has(existing.state)) {
     return {
       caseId: existing.id,

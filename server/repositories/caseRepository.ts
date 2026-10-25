@@ -104,7 +104,15 @@ export class CaseRepository {
 
   // --- Denials ---
 
-  /** Insert a denial; returns false if a denial with the same externalRef exists. */
+  /**
+   * Insert a denial, idempotent on the denial id. Returns false when a denial
+   * with the same externalRef already exists (dedupe on the source system key).
+   *
+   * On a retry/resume the same denial id can be re-inserted: rather than hitting
+   * the PRIMARY KEY constraint, an existing id is upserted (ON CONFLICT(id) DO
+   * UPDATE, mirroring upsertPatient/upsertClaim) so the second insert is a no-op
+   * update instead of a throw.
+   */
   insertDenial(d: Denial): boolean {
     if (d.externalRef) {
       const existing = this.db
@@ -116,7 +124,12 @@ export class CaseRepository {
     this.db
       .prepare(
         `INSERT INTO denials (id, claim_id, source, carrier, carc_codes, rarc_codes, denial_date, raw_text_enc, external_ref, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           claim_id=excluded.claim_id, source=excluded.source, carrier=excluded.carrier,
+           carc_codes=excluded.carc_codes, rarc_codes=excluded.rarc_codes,
+           denial_date=excluded.denial_date, raw_text_enc=excluded.raw_text_enc,
+           external_ref=excluded.external_ref`,
       )
       .run(
         d.id,

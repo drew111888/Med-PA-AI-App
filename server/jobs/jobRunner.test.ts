@@ -173,6 +173,42 @@ describe('retry + failure surfacing', () => {
     db.close();
   });
 
+  it('overlapping manual + scheduled work with restart recovery yields no duplicates', async () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+    const d = DENIALS.find((x) => x.id === 'den_001')!;
+
+    // Manual on-demand process_denial AND a scheduled poll overlap. The poll
+    // will also discover den_001, but enqueueProcessDenial dedupes on the
+    // denial:<id> idempotency key, so it maps to the SAME job.
+    const manualJobId = runner.enqueueProcessDenial(d, d.id);
+    runner.enqueue('poll_denials', { since: undefined });
+
+    // Simulate a crash: force the manual job to 'running' before it ran.
+    db.prepare("UPDATE jobs SET status='running' WHERE id=?").run(manualJobId);
+
+    // Restart recovery requeues the interrupted job, then drain finishes all.
+    const recovered = runner.recoverInterrupted();
+    expect(recovered).toBe(1);
+    await runner.drain();
+
+    // Every job finished; no job left queued/running.
+    const jobs = runner.listJobs();
+    expect(jobs.every((j) => j.status === 'done')).toBe(true);
+    // Exactly one process_denial job per distinct denial (manual == poll dedupe
+    // for den_001 via idempotency key): 3 denials -> 3 process jobs + 1 poll.
+    const processJobs = jobs.filter((j) => j.type === 'process_denial');
+    expect(processJobs.length).toBe(DENIALS.length);
+    expect(jobs.filter((j) => j.type === 'poll_denials').length).toBe(1);
+
+    // Exactly one case per denial — no duplicates from overlapping work.
+    for (const den of DENIALS) {
+      expect(deps.cases.listCases().filter((c) => c.denialId === den.id).length).toBe(1);
+    }
+    expect(deps.cases.listCases().length).toBe(DENIALS.length);
+    db.close();
+  });
+
   it('recoverInterrupted requeues jobs stuck running and resumes them', async () => {
     const { deps, audit, db } = makeDeps();
     const runner = new JobRunner(db, deps, audit, KEY);

@@ -6,7 +6,10 @@ import { AuditRepository } from '../repositories/auditRepository.ts';
 import { SyntheticEhrAdapter } from '../adapters/synthetic/syntheticEhrAdapter.ts';
 import { SyntheticPayerPolicyAdapter } from '../adapters/synthetic/syntheticPayerPolicyAdapter.ts';
 import { DeidentifyingProvider } from '../ai/deidentifyingProvider.ts';
+import { LocalAiProvider } from '../ai/localProvider.ts';
 import type { AiProviderPort } from '../ports/aiProviderPort.ts';
+import type { EHRPort } from '../ports/ehrPort.ts';
+import type { Denial } from '../domain/types.ts';
 import { DENIALS } from '../adapters/synthetic/fixtures.ts';
 
 const KEY = 'k';
@@ -43,6 +46,64 @@ describe('fail closed on AI validation (item 2)', () => {
     const c = deps.cases.getCaseByDenial('den_001');
     expect(c?.state).toBe('needs_review');
     expect(c?.packet?.aiValidationPassed).toBe(false);
+    db.close();
+  });
+});
+
+describe('retry resumes a failed case without a PRIMARY KEY violation (FEAT-002 Defect B)', () => {
+  it('re-inserts a denial WITHOUT externalRef on retry and reaches a non-failed state', async () => {
+    const db = openTestDb();
+    const realEhr = new SyntheticEhrAdapter();
+    // A denial WITHOUT externalRef (so insertDenial cannot early-return on the
+    // external_ref dedupe and would hit the id PRIMARY KEY on the second insert).
+    const denial: Denial = {
+      id: 'den_noref',
+      claimId: 'clm_001',
+      source: 'api',
+      carrier: 'Anthem',
+      carcCodes: ['50'],
+      rarcCodes: ['N115'],
+      denialDate: '2026-10-01',
+      rawText: 'Not medically necessary per policy.',
+    };
+
+    // getChartDocuments throws exactly once — AFTER the case + denial are created
+    // (classify runs before chart gather), so the first run fails mid-flight.
+    let chartCalls = 0;
+    const flakyEhr: EHRPort = {
+      name: 'flaky',
+      getPatient: (id: string) => realEhr.getPatient(id),
+      getClaim: (id: string) => realEhr.getClaim(id),
+      getChartDocuments: (p: string, cId?: string) => {
+        chartCalls++;
+        if (chartCalls === 1) throw new Error('transient chart fetch failure');
+        return realEhr.getChartDocuments(p, cId);
+      },
+      discoverDenials: (s?: string) => realEhr.discoverDenials(s),
+    };
+
+    const cases = new CaseRepository(db, KEY);
+    const audit = new AuditRepository(db, KEY);
+    const deps: OrchestratorDeps = {
+      ehr: flakyEhr,
+      payerPolicy: new SyntheticPayerPolicyAdapter(),
+      ai: new DeidentifyingProvider(new LocalAiProvider()),
+      cases,
+      audit,
+    };
+
+    // First run fails after the case + denial exist.
+    await expect(processDenial(deps, denial)).rejects.toThrow(/transient chart fetch/);
+    expect(cases.getCaseByDenial('den_noref')?.state).toBe('failed');
+    expect((db.prepare('SELECT COUNT(*) c FROM denials WHERE id=?').get('den_noref') as any).c).toBe(1);
+
+    // Retry: insertDenial re-runs on the SAME id and must NOT throw a PK violation.
+    const result = await processDenial(deps, denial);
+    expect(result.state).not.toBe('failed');
+    expect(cases.getCaseByDenial('den_noref')?.state).toBe('packet_ready');
+    // Still exactly one denial row and one appeal_case row (no duplicates).
+    expect((db.prepare('SELECT COUNT(*) c FROM denials WHERE id=?').get('den_noref') as any).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM appeal_cases WHERE denial_id=?').get('den_noref') as any).c).toBe(1);
     db.close();
   });
 });
