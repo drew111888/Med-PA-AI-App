@@ -44,6 +44,24 @@ const Appeals: React.FC = () => {
   const clinicalFileRef = useRef<HTMLInputElement>(null);
   const policyFileRef = useRef<HTMLInputElement>(null);
 
+  // Consume evidence handed off from the Analyzer, if present.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('medauth_appeal_handoff');
+      if (!raw) return;
+      const handoff = JSON.parse(raw);
+      setFormData((prev) => ({
+        ...prev,
+        cptCode: handoff.cptCode || prev.cptCode,
+        denialReason: handoff.denialReason || prev.denialReason,
+        clinicalEvidence: handoff.clinicalEvidence || prev.clinicalEvidence,
+      }));
+      localStorage.removeItem('medauth_appeal_handoff');
+    } catch {
+      /* ignore malformed handoff */
+    }
+  }, []);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'DENIAL' | 'CLINICAL' | 'POLICY') => {
     const file = e.target.files?.[0];
     if (!file) return;

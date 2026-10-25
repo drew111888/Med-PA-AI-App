@@ -9,7 +9,8 @@ import {
   Library, 
   LogOut, 
   Lock, 
-  Users 
+  Users,
+  Inbox
 } from 'lucide-react';
 import { View, User } from '../types.ts';
 import { canAccessView } from '../services/permissionsService.ts';
@@ -24,6 +25,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, user, onLogout }) => {
   const navItems = [
     { id: View.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
+    { id: View.CASES, label: 'Appeal Cases', icon: Inbox },
     { id: View.ANALYZER, label: 'Auth Analyzer', icon: ShieldCheck },
     { id: View.LIBRARY, label: 'Policy Library', icon: Library },
     { id: View.APPEALS, label: 'Appeal Builder', icon: FileText },

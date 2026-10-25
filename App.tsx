@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar.tsx';
 import Dashboard from './components/Dashboard.tsx';
+import Cases from './components/Cases.tsx';
 import Analyzer from './components/Analyzer.tsx';
 import Appeals from './components/Appeals.tsx';
 import History from './components/History.tsx';
@@ -57,8 +58,10 @@ const App: React.FC = () => {
       switch (currentView) {
         case View.DASHBOARD:
           return <Dashboard onNavigate={setCurrentView} />;
+        case View.CASES:
+          return <Cases />;
         case View.ANALYZER:
-          return <Analyzer />;
+          return <Analyzer onNavigate={setCurrentView} />;
         case View.APPEALS:
           return <Appeals />;
         case View.HISTORY:

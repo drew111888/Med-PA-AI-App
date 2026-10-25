@@ -22,6 +22,7 @@ export interface AppealLetterRequest {
 
 export enum View {
   DASHBOARD = 'DASHBOARD',
+  CASES = 'CASES',
   ANALYZER = 'ANALYZER',
   APPEALS = 'APPEALS',
   HISTORY = 'HISTORY',

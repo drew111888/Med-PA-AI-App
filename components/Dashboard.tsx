@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ShieldCheck, AlertCircle, FileText, CheckCircle2, ArrowUpRight, Lock, Database, Wifi, History as HistoryIcon, Activity } from 'lucide-react';
 import { View } from '../types.ts';
 import { getDashboardStats, getHistory, ExtendedRecord } from '../services/historyService.ts';
+import { api, CaseSummary, HealthInfo, SummaryInfo } from '../services/apiClient.ts';
 
 interface DashboardProps {
   onNavigate: (view: View) => void;
@@ -11,10 +12,17 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [stats, setStats] = useState(getDashboardStats());
   const [recentHistory, setRecentHistory] = useState<ExtendedRecord[]>([]);
+  const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [cases, setCases] = useState<CaseSummary[]>([]);
+  const [summary, setSummary] = useState<SummaryInfo | null>(null);
 
   useEffect(() => {
     setStats(getDashboardStats());
     setRecentHistory(getHistory().slice(0, 5));
+    // Pull live backend status + cases + deadlines; degrade gracefully if offline.
+    api.health().then(setHealth).catch(() => setHealth(null));
+    api.listCases().then((d) => setCases(d.cases)).catch(() => setCases([]));
+    api.summary().then(setSummary).catch(() => setSummary(null));
   }, []);
 
   const statCards = [
@@ -35,11 +43,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-blue-400 text-[9px] font-black uppercase tracking-widest shadow-lg">
             <Activity size={12} /> v2.8.4
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-[9px] font-black uppercase tracking-widest">
-            <Wifi size={12} /> Sync Active
+          <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-xl text-[9px] font-black uppercase tracking-widest ${health ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
+            <Wifi size={12} /> {health ? `Local API ${health.db}` : 'API Offline'}
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-xl text-blue-700 text-[9px] font-black uppercase tracking-widest">
-            <Database size={12} /> BAA Secured
+            <Database size={12} /> {health ? `EHR: ${health.ehrAdapter}` : 'BAA Secured'}
           </div>
         </div>
       </div>
@@ -57,6 +65,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         ))}
       </div>
+
+      {summary && summary.deadlines.length > 0 && (
+        <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500 text-white rounded-xl"><AlertCircle size={20} /></div>
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Appeal Deadlines</h3>
+            </div>
+            {summary.urgentDeadlines.length > 0 && (
+              <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl bg-rose-50 text-rose-600">
+                {summary.urgentDeadlines.length} urgent (&le; 14 days)
+              </span>
+            )}
+          </div>
+          <div className="space-y-2">
+            {summary.deadlines.slice(0, 6).map((d) => (
+              <div key={d.caseId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-50 hover:bg-slate-50/60 transition-all">
+                <div className="flex items-center gap-3">
+                  <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${d.state === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{d.state.replace(/_/g, ' ')}</span>
+                  <span className="font-bold text-slate-900 text-sm">{d.denialId}</span>
+                </div>
+                <span className={`text-[11px] font-black uppercase tracking-widest ${d.daysRemaining <= 14 && d.state !== 'submitted' ? 'text-rose-600' : 'text-slate-500'}`}>
+                  {d.daysRemaining < 0 ? 'Past due' : `${d.daysRemaining}d`} • {d.appealDeadline}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-8 rounded-[40px] shadow-sm border border-slate-100">
@@ -116,15 +153,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             </div>
             <h3 className="text-2xl font-black mb-3 uppercase tracking-tight">Secure Action</h3>
             <p className="text-slate-400 text-sm leading-relaxed mb-8 font-medium">
-              Start a new HIPAA-compliant analysis or build an evidence-based appeal using Gemini's clinical reasoning.
+              Review autonomous appeal cases or start a manual analysis. All processing runs on this local workstation.
             </p>
+            {cases.length > 0 && (
+              <div className="mb-6 p-4 bg-white/5 rounded-2xl border border-white/10">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Pipeline Cases</p>
+                <p className="text-3xl font-black text-white">{cases.length}</p>
+                <p className="text-[9px] font-black text-blue-300 uppercase tracking-widest mt-1">
+                  {cases.filter((c) => c.packetReady).length} ready for review
+                </p>
+              </div>
+            )}
           </div>
           <div className="space-y-4">
              <button 
-              onClick={() => onNavigate(View.ANALYZER)}
+              onClick={() => onNavigate(View.CASES)}
               className="w-full bg-blue-600 text-white font-black uppercase tracking-widest text-xs py-5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/40 border border-blue-400/30"
             >
-              Start Clinical Analysis
+              Review Appeal Cases
+            </button>
+             <button 
+              onClick={() => onNavigate(View.ANALYZER)}
+              className="w-full bg-white/5 text-white font-black uppercase tracking-widest text-xs py-4 rounded-2xl hover:bg-white/10 transition-all border border-white/10"
+            >
+              Start Manual Analysis
             </button>
             <div className="flex items-center justify-center gap-4 text-[9px] text-slate-500 uppercase font-black tracking-[0.2em]">
               <span>AES-256</span>
