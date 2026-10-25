@@ -31,7 +31,7 @@ const statusChip = (status: JobRow['status']): string => {
   return map[status];
 };
 
-const WorkflowRuns: React.FC = () => {
+const WorkflowRuns: React.FC<{ refreshKey?: number }> = ({ refreshKey = 0 }) => {
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
 
   const refresh = useCallback(async () => {
@@ -47,7 +47,7 @@ const WorkflowRuns: React.FC = () => {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+  }, [refresh, refreshKey]);
 
   return (
     <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">

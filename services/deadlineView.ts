@@ -19,7 +19,7 @@ export const SYNTHETIC_RULE_LABEL = 'calculated from synthetic rule';
 
 export interface DeadlineView {
   known: boolean;
-  /** Short status chip, e.g. '12d', 'Past due', or 'Deadline unknown'. */
+  /** Short status chip, e.g. '12d', 'Deadline calculated', or 'Deadline unknown'. */
   urgencyLabel: string;
   /** True only when a known deadline is within the 14-day urgent window. */
   urgent: boolean;
@@ -30,13 +30,13 @@ export interface DeadlineView {
 const URGENT_WINDOW_DAYS = 14;
 
 /**
- * Describe a deadline item for display. Branches on deadlineKnown so a null
- * daysRemaining / appealDeadline is NEVER formatted as a number or compared
- * numerically.
+ * Describe a deadline item for display. A known filing date remains known when
+ * a case endpoint omits the day count; that only disables numeric urgency.
+ * Null values are never formatted as numbers or compared numerically.
  */
 export const describeDeadline = (item: Pick<DeadlineItem,
   'deadlineKnown' | 'appealDeadline' | 'daysRemaining' | 'deadlineBlockers'>): DeadlineView => {
-  if (!item.deadlineKnown || item.appealDeadline == null || item.daysRemaining == null) {
+  if (!item.deadlineKnown || item.appealDeadline == null) {
     const blockers = item.deadlineBlockers.length
       ? item.deadlineBlockers.join(', ')
       : 'the missing date/rule source';
@@ -50,8 +50,8 @@ export const describeDeadline = (item: Pick<DeadlineItem,
   const days = item.daysRemaining;
   return {
     known: true,
-    urgencyLabel: days < 0 ? 'Past due' : `${days}d`,
-    urgent: days <= URGENT_WINDOW_DAYS,
+    urgencyLabel: days == null ? 'Deadline calculated' : days < 0 ? 'Past due' : `${days}d`,
+    urgent: days != null && days <= URGENT_WINDOW_DAYS,
     detail: `${item.appealDeadline} (${SYNTHETIC_RULE_LABEL})`,
   };
 };

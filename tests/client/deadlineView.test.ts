@@ -32,9 +32,25 @@ describe('describeDeadline (null-safe)', () => {
     expect(v.detail).toContain('the missing date/rule source');
   });
 
-  it('treats deadlineKnown=true but null fields as unknown (defensive)', () => {
+  it('treats deadlineKnown=true but a null filing date as unknown (defensive)', () => {
     const v = describeDeadline({ deadlineKnown: true, appealDeadline: null, daysRemaining: null, deadlineBlockers: ['x'] });
     expect(v.known).toBe(false);
+    expect(v.urgencyLabel).not.toContain('null');
+  });
+
+  it('preserves a calculated case deadline when the endpoint omits the day count', () => {
+    // Both the case list and detail supply the known date without daysRemaining.
+    const v = describeDeadline({
+      deadlineKnown: true,
+      appealDeadline: '2026-11-30',
+      daysRemaining: null,
+      deadlineBlockers: [],
+    });
+    expect(v.known).toBe(true);
+    expect(v.detail).toBe(`2026-11-30 (${SYNTHETIC_RULE_LABEL})`);
+    expect(v.urgencyLabel).toBe('Deadline calculated');
+    expect(v.urgent).toBe(false);
+    expect(v.detail).not.toContain('unknown');
     expect(v.urgencyLabel).not.toContain('null');
   });
 

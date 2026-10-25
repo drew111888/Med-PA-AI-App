@@ -10,6 +10,7 @@ import {
   type CaseSummary,
   type CaseDetail,
   type ApiError,
+  type ApiResult,
   type AppealCaseState,
   type HandoffPackage,
   type ReceiptInfo,
@@ -18,6 +19,7 @@ import {
 } from '../services/apiClient.ts';
 import { useSession } from '../services/sessionContext.tsx';
 import { describeDeadline } from '../services/deadlineView.ts';
+import { createCaseDetailRequests } from '../services/caseDetailRequests.ts';
 import type { Capabilities } from '../services/capabilities.ts';
 import WorkflowRuns from './WorkflowRuns.tsx';
 
@@ -70,6 +72,9 @@ const Cases: React.FC = () => {
   const [detail, setDetail] = useState<DetailState>({ phase: 'idle' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SummaryInfo | null>(null);
+  const [jobsRevision, setJobsRevision] = useState(0);
+  const [conflictNotices, setConflictNotices] = useState<Record<string, ApiError>>({});
+  const detailRequests = useRef(createCaseDetailRequests<ApiResult<CaseDetail>>());
 
   const refresh = useCallback(async () => {
     setList({ phase: 'loading' });
@@ -84,12 +89,19 @@ const Cases: React.FC = () => {
     setSummary(isOk(res) ? res.data : null);
   }, []);
 
-  const openCase = useCallback(async (id: string) => {
-    setSelectedId(id);
-    setDetail({ phase: 'loading', id });
-    const res = await api.getCase(id);
-    if (isOk(res)) setDetail({ phase: 'ready', detail: res.data });
-    else setDetail({ phase: 'error', id, error: res });
+  const openCase = useCallback(async (id: string, refreshOnly = false) => {
+    const load = refreshOnly ? detailRequests.current.refreshSelected : detailRequests.current.select;
+    await load(id, {
+      load: api.getCase,
+      onStart: (caseId) => {
+        setSelectedId(caseId);
+        setDetail({ phase: 'loading', id: caseId });
+      },
+      onResult: (caseId, res) => {
+        if (isOk(res)) setDetail({ phase: 'ready', detail: res.data });
+        else setDetail({ phase: 'error', id: caseId, error: res });
+      },
+    });
   }, []);
 
   useEffect(() => { void refresh(); void refreshSummary(); }, [refresh, refreshSummary]);
@@ -99,8 +111,17 @@ const Cases: React.FC = () => {
    * from server truth — several mutation responses return only partial rows),
    * the list, and the summary. Never advance/close a case optimistically.
    */
-  const reloadAfterMutation = useCallback(async (id: string) => {
-    await Promise.all([openCase(id), refresh(), refreshSummary()]);
+  const reloadAfterMutation = useCallback(async (id: string, conflict?: ApiError) => {
+    // Parent-owned notices survive review-panel loading, unmounts, and state changes.
+    setConflictNotices((current) => {
+      if (conflict) return { ...current, [id]: conflict };
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    await Promise.all([openCase(id, true), refresh(), refreshSummary()]);
+    setJobsRevision((revision) => revision + 1);
   }, [openCase, refresh, refreshSummary]);
 
   return (
@@ -127,8 +148,19 @@ const Cases: React.FC = () => {
       {/* Pipeline run controls — synchronous drains, NOT async accepted jobs. */}
       {capabilities.canRun && (
         <RunControls
-          onRan={async () => { await Promise.all([refresh(), refreshSummary()]); }}
+          onRan={async () => {
+            await Promise.all([refresh(), refreshSummary()]);
+            setJobsRevision((revision) => revision + 1);
+          }}
         />
+      )}
+
+      {selectedId && conflictNotices[selectedId] && (
+        <div role="alert" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-xs space-y-1">
+          <p className="font-black uppercase tracking-widest">Action conflict — review refreshed case</p>
+          <p>{conflictNotices[selectedId].message}</p>
+          <p>Review the current case and packet version before taking another action.</p>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -218,7 +250,7 @@ const Cases: React.FC = () => {
       </div>
 
       {/* Global pipeline job queue (read-only). */}
-      <WorkflowRuns />
+      <WorkflowRuns refreshKey={jobsRevision} />
     </div>
   );
 };
@@ -330,7 +362,7 @@ const RunControls: React.FC<{ onRan: () => Promise<void> }> = ({ onRan }) => {
 const CaseReview: React.FC<{
   detail: CaseDetail;
   capabilities: Capabilities;
-  onMutated: (id: string) => Promise<void>;
+  onMutated: (id: string, conflict?: ApiError) => Promise<void>;
 }> = ({ detail, capabilities, onMutated }) => {
   const canApprove = capabilities.canApprove;
   const { case: c, audit } = detail;
@@ -395,7 +427,7 @@ const CaseReview: React.FC<{
       // 409 => packet changed / already approved: force re-review, never retry.
       if (res.kind === 'conflict') {
         setAcknowledged(false);
-        await onMutated(c.id);
+        await onMutated(c.id, res);
       }
       setApproveError(res);
     }
@@ -409,7 +441,7 @@ const CaseReview: React.FC<{
       setGeneratedHandoff(res.data.package);
       await onMutated(c.id);
     } else {
-      if (res.kind === 'conflict') await onMutated(c.id);
+      if (res.kind === 'conflict') await onMutated(c.id, res);
       setHandoffError(res);
     }
     setHandoffPending(false);
@@ -458,7 +490,7 @@ const CaseReview: React.FC<{
       else { setReceipt(null); setReceiptError(rc); }
       await onMutated(c.id);
     } else {
-      if (res.kind === 'conflict') await onMutated(c.id);
+      if (res.kind === 'conflict') await onMutated(c.id, res);
       setSubmitError(res);
     }
     setSubmitPending(false);
@@ -470,7 +502,7 @@ const CaseReview: React.FC<{
     if (isOk(res)) {
       await onMutated(c.id);
     } else {
-      if (res.kind === 'conflict') await onMutated(c.id);
+      if (res.kind === 'conflict') await onMutated(c.id, res);
       setRetryError(res);
     }
     setRetryPending(false);
