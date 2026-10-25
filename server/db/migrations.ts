@@ -102,4 +102,84 @@ export const MIGRATIONS: Migration[] = [
         ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
     `,
   },
+  {
+    id: '0003_hardening',
+    sql: `
+      -- Users for server-side authentication/authorization. Password is a
+      -- salted scrypt hash; never plaintext. Role drives permissions.
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,              -- 'ADMIN' | 'PROVIDER' | 'BILLER'
+        password_hash TEXT NOT NULL,     -- scrypt: salt:hash (hex)
+        created_at TEXT NOT NULL
+      );
+
+      -- Opaque bearer sessions. The audit actor is derived from here, never
+      -- from a client-supplied name.
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY,     -- sha256 of the bearer token
+        user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      -- Packet versioning: a case's current packet version and content hash.
+      -- Editing evidence/draft bumps the version and invalidates prior approval.
+      ALTER TABLE appeal_cases ADD COLUMN packet_version INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE appeal_cases ADD COLUMN packet_hash TEXT;
+
+      -- Approval bound to a specific packet version. A stale approval (version
+      -- mismatch) is rejected downstream.
+      ALTER TABLE appeal_cases ADD COLUMN approved_version INTEGER;
+      ALTER TABLE appeal_cases ADD COLUMN approved_by TEXT;
+      ALTER TABLE appeal_cases ADD COLUMN approved_at TEXT;
+
+      -- Handoff artifact (encrypted) and the version it was generated from.
+      ALTER TABLE appeal_cases ADD COLUMN handoff_enc TEXT;
+      ALTER TABLE appeal_cases ADD COLUMN handoff_version INTEGER;
+      ALTER TABLE appeal_cases ADD COLUMN handoff_generated_at TEXT;
+
+      -- Submission receipt (human-recorded). Only this marks a case 'submitted'.
+      ALTER TABLE appeal_cases ADD COLUMN submission_receipt_enc TEXT;
+      ALTER TABLE appeal_cases ADD COLUMN submitted_by TEXT;
+      ALTER TABLE appeal_cases ADD COLUMN submitted_at TEXT;
+
+      -- Encrypt job payloads at rest (they can contain denial narrative PHI).
+      -- New encrypted column; legacy plaintext 'payload' tolerated on read.
+      ALTER TABLE jobs ADD COLUMN payload_enc TEXT;
+
+      -- Encrypt audit detail at rest (may contain citation snippets / PHI).
+      ALTER TABLE audit_log ADD COLUMN detail_enc TEXT;
+    `,
+  },
+  {
+    id: '0004_nullable_denial_date',
+    sql: `
+      -- denial_date must be NULLABLE: we never fabricate a date, so a denial
+      -- whose source omitted it is stored with NULL. Rebuild the table since
+      -- SQLite cannot drop a NOT NULL constraint in place.
+      CREATE TABLE denials_new (
+        id TEXT PRIMARY KEY,
+        claim_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        carrier TEXT NOT NULL,
+        carc_codes TEXT NOT NULL,
+        rarc_codes TEXT NOT NULL,
+        denial_date TEXT,                 -- now nullable
+        raw_text_enc TEXT,
+        external_ref TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (claim_id) REFERENCES claims(id)
+      );
+      INSERT INTO denials_new SELECT id, claim_id, source, carrier, carc_codes,
+        rarc_codes, denial_date, raw_text_enc, external_ref, created_at FROM denials;
+      DROP TABLE denials;
+      ALTER TABLE denials_new RENAME TO denials;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_denials_external_ref
+        ON denials(external_ref) WHERE external_ref IS NOT NULL;
+    `,
+  },
 ];

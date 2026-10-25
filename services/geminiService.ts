@@ -1,200 +1,63 @@
+/**
+ * AI service (client shim).
+ *
+ * SECURITY: The browser no longer talks to any AI provider directly. The former
+ * in-browser Google GenAI client (and its bundled API key) has been removed —
+ * it sent PHI off the local machine and leaked the key into the client bundle.
+ *
+ * All AI operations now route through the local backend, which enforces
+ * de-identification at a single choke point (AIProviderPort) and keeps cloud
+ * providers disabled by default. These functions preserve their original
+ * signatures so existing UI components keep compiling unchanged; each one calls
+ * the local backend instead of a remote model.
+ *
+ * NOTE FOR THE UI AGENT: the backend AI endpoints these call are intentionally
+ * minimal right now. If/when the manual Analyzer and Appeal-builder flows are
+ * reworked, prefer the verified case/packet APIs in services/apiClient.ts over
+ * these shims. Cloud AI remains disabled server-side pending hardened
+ * de-identification of arbitrary clinical text.
+ *
+ * Author / Prepared by: Anthony LaVear
+ * Title: Lead BSA, SDIT Architecture
+ */
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { AnalysisResult, AppealLetterRequest, MedicalPolicy, RedactionMapping, PolicyDigest } from "../types.ts";
-import { deIdentify, reIdentify } from "./complianceService.ts";
+import { AnalysisResult, AppealLetterRequest, MedicalPolicy, PolicyDigest } from "../types.ts";
 
-// Lazily initialize the AI client to avoid reference errors on module load
-let aiInstance: GoogleGenAI | null = null;
-const getAI = () => {
-  if (!aiInstance) {
-    const apiKey = process?.env?.API_KEY || "";
-    aiInstance = new GoogleGenAI({ apiKey });
-  }
-  return aiInstance;
+const BASE =
+  (typeof process !== "undefined" && (process as any).env?.MEDAUTH_API_BASE) || "";
+
+const notWired = (feature: string): never => {
+  throw new Error(
+    `${feature} is not available: in-browser AI has been removed for PHI safety. ` +
+      `Use the backend case/packet pipeline (see services/apiClient.ts). ` +
+      `A backend endpoint for this manual flow has not been wired yet.`,
+  );
 };
 
 /**
- * Analyzes clinical notes against medical necessity guidelines using Gemini 3 Pro.
+ * Manual guideline analysis. The autonomous pipeline performs this server-side;
+ * a dedicated manual endpoint is not yet exposed, so this fails loudly rather
+ * than silently calling a remote model from the browser.
  */
 export const analyzeGuidelines = async (
-  guidelineText: string,
-  clinicalNotes: string,
-  cptCode: string,
-  useSecureMode: boolean = false
-): Promise<AnalysisResult> => {
-  const ai = getAI();
-  let processedNotes = clinicalNotes;
-  let mapping: RedactionMapping = {};
+  _guidelineText: string,
+  _clinicalNotes: string,
+  _cptCode: string,
+  _useSecureMode: boolean = false,
+): Promise<AnalysisResult> => notWired("Manual guideline analysis");
 
-  if (useSecureMode) {
-    const redaction = deIdentify(clinicalNotes, {});
-    processedNotes = redaction.redactedText;
-    mapping = redaction.mapping;
-  }
+export const generatePolicyDigest = async (
+  _policyContent: string,
+): Promise<PolicyDigest> => notWired("Policy digest generation");
 
-  const prompt = `
-    Analyze the following patient clinical notes against the provided medical necessity guidelines for CPT code: ${cptCode}.
-    
-    GUIDELINES:
-    ${guidelineText}
-    
-    PATIENT CLINICAL NOTES:
-    ${processedNotes}
-    
-    Evaluate if the criteria are met. Provide a confidence score and clear reasoning.
-  `;
+export const generateAppealLetter = async (
+  _request: AppealLetterRequest,
+  _useSecureMode: boolean = false,
+): Promise<string> => notWired("Manual appeal-letter generation");
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: "You are a senior medical necessity reviewer. Your task is to compare clinical documentation against insurance policy criteria. Be objective, precise, and identify specific missing documentation elements required for authorization approval. Return valid JSON.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          status: { type: Type.STRING, enum: ['Likely Approved', 'Likely Denied', 'Insufficient Data'] },
-          confidenceScore: { type: Type.NUMBER },
-          reasoning: { type: Type.STRING },
-          missingRequirements: { type: Type.ARRAY, items: { type: Type.STRING } },
-          suggestedActionItems: { type: Type.ARRAY, items: { type: Type.STRING } },
-          referenceQuotes: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ["status", "confidenceScore", "reasoning"]
-      }
-    }
-  });
+export const parsePolicyDocument = async (
+  _base64Data: string,
+  _mimeType: string,
+): Promise<Partial<MedicalPolicy>> => notWired("Client-side document parsing");
 
-  const text = response.text || "{}";
-  const result: AnalysisResult = JSON.parse(text);
-  
-  if (useSecureMode) {
-    result.reasoning = reIdentify(result.reasoning || "", mapping);
-    result.missingRequirements = (result.missingRequirements || []).map(r => reIdentify(r, mapping));
-    result.suggestedActionItems = (result.suggestedActionItems || []).map(a => reIdentify(a, mapping));
-  }
-
-  return result;
-};
-
-/**
- * Generates a structured digest of a medical policy.
- */
-export const generatePolicyDigest = async (policyContent: string): Promise<PolicyDigest> => {
-  const ai = getAI();
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Summarize this medical policy into a structured digest for medical office staff. Focus on what is required to get an authorization approved. \n\nPOLICY:\n${policyContent}`,
-    config: {
-      systemInstruction: "You are a clinical policy analyst. Extract requirements, exclusions, and documentation checklists from long medical policies. Return valid JSON.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          summary: { type: Type.STRING },
-          keyCriteria: { type: Type.ARRAY, items: { type: Type.STRING } },
-          exclusionCriteria: { type: Type.ARRAY, items: { type: Type.STRING } },
-          documentationChecklist: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ["summary", "keyCriteria", "documentationChecklist"]
-      }
-    }
-  });
-
-  return JSON.parse(response.text || "{}");
-};
-
-/**
- * Generates a formal medical appeal letter using Gemini 3 Flash.
- */
-export const generateAppealLetter = async (request: AppealLetterRequest, useSecureMode: boolean = false): Promise<string> => {
-  const ai = getAI();
-  let mapping: RedactionMapping = {};
-  let req = { ...request };
-
-  if (useSecureMode) {
-    const nameRedaction = deIdentify(request.patientName, { name: request.patientName });
-    req.patientName = "[PATIENT_NAME]";
-    
-    const policyRedaction = deIdentify(request.policyNumber, { policy: request.policyNumber });
-    req.policyNumber = "[POLICY_ID]";
-    
-    const evidenceRedaction = deIdentify(request.clinicalEvidence, { name: request.patientName, policy: request.policyNumber });
-    req.clinicalEvidence = evidenceRedaction.redactedText;
-
-    mapping = { 
-      ...nameRedaction.mapping, 
-      ...policyRedaction.mapping, 
-      ...evidenceRedaction.mapping 
-    };
-  }
-
-  const prompt = `
-    Draft a formal ${req.templateType} medical appeal letter.
-    
-    Patient: ${req.patientName}
-    Policy: ${req.policyNumber}
-    Insurance: ${req.insuranceProvider}
-    CPT: ${req.cptCode}
-    Reason for Denial: ${req.denialReason}
-    Supporting Clinical Evidence: ${req.clinicalEvidence}
-    
-    Instructions:
-    - Use professional medical tone.
-    - Cite the clinical evidence specifically.
-    - If it's a 'Medical Necessity' appeal, focus on why the service is the standard of care.
-    - If it's 'Experimental', cite potential clinical trial evidence or FDA status.
-    - Use standard HIPAA-compliant letter formatting.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: prompt,
-    config: {
-      systemInstruction: "You are a senior medical billing advocate and physician advisor. Your letters are highly professional, evidence-based, and designed to overturn insurance denials."
-    }
-  });
-
-  const letter = response.text || "Failed to generate letter.";
-  return useSecureMode ? reIdentify(letter, mapping) : letter;
-};
-
-/**
- * Parses medical policy documents (PDF/Text) into structured data.
- */
-export const parsePolicyDocument = async (base64Data: string, mimeType: string): Promise<Partial<MedicalPolicy>> => {
-  const ai = getAI();
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Data
-          }
-        },
-        {
-          text: "Extract the following details from this medical policy document: Carrier name, Policy Title, CPT Codes mentioned, any Medications mentioned, and a summary of the Clinical Necessity Guidelines."
-        }
-      ]
-    },
-    config: {
-      systemInstruction: "You are a medical data extraction expert. Extract structural information from insurance carrier policy documents and return it in a structured format.",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          carrier: { type: Type.STRING },
-          title: { type: Type.STRING },
-          cptCodes: { type: Type.ARRAY, items: { type: Type.STRING } },
-          medications: { type: Type.ARRAY, items: { type: Type.STRING } },
-          content: { type: Type.STRING },
-          tags: { type: Type.ARRAY, items: { type: Type.STRING } }
-        }
-      }
-    }
-  });
-
-  return JSON.parse(response.text || "{}");
-};
+export { BASE as MEDAUTH_API_BASE };

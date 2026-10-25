@@ -128,7 +128,8 @@ export class AthenaEhrAdapter implements EHRPort {
       carrier: rec.insurancecarrier ?? rec.payername ?? 'Unknown',
       carcCodes: reasons.map((r) => String(r.carc ?? r.reasoncode)).filter(Boolean),
       rarcCodes: reasons.map((r) => String(r.rarc ?? r.remarkcode)).filter(Boolean),
-      denialDate: normalizeDate(rec.denialdate ?? rec.lastmodified) ?? new Date().toISOString().slice(0, 10),
+      // Never fabricate: null when Athena provides no usable denial date.
+      denialDate: normalizeDate(rec.denialdate ?? rec.lastmodified) ?? null,
       externalRef: String(rec.remittanceid ?? rec.claimid ?? rec.id),
     };
   }

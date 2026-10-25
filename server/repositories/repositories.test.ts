@@ -110,7 +110,7 @@ describe('persistence across restart (file-backed)', () => {
 describe('AuditRepository', () => {
   it('records entries per case in order', () => {
     const db = openTestDb();
-    const audit = new AuditRepository(db);
+    const audit = new AuditRepository(db, 'test-enc-key');
     audit.log({ caseId: 'case_1', actor: 'system', action: 'classified', detail: 'ok' });
     audit.log({ caseId: 'case_1', actor: 'system', action: 'gated', detail: 'appeal_ready' });
     const entries = audit.forCase('case_1');

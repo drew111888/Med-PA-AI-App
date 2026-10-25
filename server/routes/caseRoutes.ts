@@ -1,59 +1,101 @@
 /**
- * Case, packet, job, and approval API routes.
+ * Case, packet, job, approval, handoff, and submission API routes.
  *
- * These back the re-wired UI: list cases, view a packet + evidence, trigger an
- * on-demand run, run a scheduled poll, and record the human approval gate.
- * Approval and submission are explicit, audited actions.
+ * Every route is authenticated and permission-checked. The audit actor is ALWAYS
+ * derived from req.authUser (the authenticated session), never from a body field.
+ *
+ * State machine surfaced to clients:
+ *   packet_ready -> approved -> handoff_generated -> submitted
+ * with needs_review / needs_more_data / ineligible / failed as terminal-ish side
+ * states. Deadline urgency is retained until a submission receipt is recorded.
  */
 
 import { Router } from 'express';
 import type { Services } from '../services.ts';
 import type { EHRPort } from '../ports/ehrPort.ts';
+import type { UserRepository } from '../auth/userRepository.ts';
+import { requireAuth, requirePermission } from '../auth/middleware.ts';
 import { intakeDenialFromPdf } from '../intake/denialIntake.ts';
-import { buildSubmissionPackage, SubmissionError } from '../submission/submissionHandoff.ts';
+import {
+  generateHandoff,
+  recordSubmission,
+  SubmissionError,
+} from '../submission/submissionHandoff.ts';
 import { daysUntil } from '../pipeline/classifier.ts';
+import { OPEN_FOR_DEADLINE, type AppealCaseState } from '../domain/types.ts';
 
-export const createCaseRouter = (services: Services, ehr: EHRPort): Router => {
+export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRepository): Router => {
   const router = Router();
   const { cases, audit, jobs, ai } = services;
 
-  // List all appeal cases (summary view).
-  router.get('/cases', (_req, res) => {
+  // All case routes require authentication.
+  router.use(requireAuth(users));
+
+  // --- Reads (view_cases) ---
+
+  router.get('/cases', requirePermission('view_cases'), (_req, res) => {
     const list = cases.listCases().map((c) => ({
       id: c.id,
       denialId: c.denialId,
       state: c.state,
       category: c.classification?.category ?? null,
       appealDeadline: c.classification?.appealDeadline ?? null,
+      deadlineStatus: c.classification?.deadlineStatus ?? null,
       gateDecision: c.gate?.decision ?? null,
-      packetReady: c.state === 'packet_ready' || c.state === 'approved' || c.state === 'submitted',
+      packetVersion: c.packetVersion,
+      approvedVersion: c.approvedVersion,
+      packetReady: c.state === 'packet_ready',
       updatedAt: c.updatedAt,
     }));
     res.json({ count: list.length, cases: list });
   });
 
-  // Full case detail including the packet.
-  router.get('/cases/:id', (req, res) => {
+  router.get('/cases/:id', requirePermission('view_cases'), (req, res) => {
     const c = cases.getCase(req.params.id);
     if (!c) return res.status(404).json({ error: 'case not found' });
     res.json({ case: c, audit: audit.forCase(c.id) });
   });
 
-  // Human approval gate. Transitions packet_ready -> approved and audits it.
-  router.post('/cases/:id/approve', (req, res) => {
+  // --- Approval (approve_appeal). Version-checked, fail-closed. ---
+
+  router.post('/cases/:id/approve', requirePermission('approve_appeal'), (req, res) => {
     const c = cases.getCase(req.params.id);
     if (!c) return res.status(404).json({ error: 'case not found' });
+
+    // Fail closed: only an AI-validated, complete packet is approvable.
     if (c.state !== 'packet_ready') {
       return res.status(409).json({ error: `cannot approve from state ${c.state}` });
     }
-    const actor = (req.body?.actor as string) || 'user';
-    cases.updateCase(c.id, { state: 'approved' });
-    audit.log({ caseId: c.id, actor, action: 'approved', detail: 'packet approved for submission' });
-    res.json({ ok: true, state: 'approved' });
+    if (!c.packet || !c.packet.aiValidationPassed) {
+      return res.status(409).json({ error: 'packet has not passed AI validation' });
+    }
+    if (c.packet.evidence.length === 0) {
+      return res.status(409).json({ error: 'packet has no supporting evidence' });
+    }
+    if (c.classification?.deadlineStatus !== 'calculated' || !c.classification?.appealDeadline) {
+      return res.status(409).json({
+        error: 'appeal deadline is unknown; supply the missing date/rule before approval',
+        deadlineBlockers: c.classification?.deadlineBlockers ?? [],
+      });
+    }
+
+    // Version guard: client must approve the exact version it reviewed.
+    const expectedVersion = Number(req.body?.packetVersion);
+    if (!Number.isInteger(expectedVersion)) {
+      return res.status(400).json({ error: 'packetVersion (integer) is required' });
+    }
+
+    const result = cases.approve(c.id, req.authUser!.id, expectedVersion);
+    if (!result.ok) {
+      return res.status(409).json({ error: result.reason });
+    }
+    audit.log({ caseId: c.id, actor: req.authUser!.id, action: 'approved', detail: `v${expectedVersion}` });
+    res.json({ ok: true, state: 'approved', approvedVersion: expectedVersion });
   });
 
-  // On-demand run: enqueue + drain a single denial discovered via the EHR port.
-  router.post('/run/denial/:denialId', async (req, res, next) => {
+  // --- Pipeline runs (run_pipeline) ---
+
+  router.post('/run/denial/:denialId', requirePermission('run_pipeline'), async (req, res, next) => {
     try {
       const denials = await ehr.discoverDenials();
       const denial = denials.find((d) => d.id === req.params.denialId);
@@ -67,9 +109,7 @@ export const createCaseRouter = (services: Services, ehr: EHRPort): Router => {
     }
   });
 
-  // PDF-fallback intake: normalize a denial from document text and run it
-  // through the IDENTICAL pipeline as API-sourced denials.
-  router.post('/intake/pdf', async (req, res, next) => {
+  router.post('/intake/pdf', requirePermission('run_pipeline'), async (req, res, next) => {
     try {
       const { text, claimId, carrier, denialId, externalRef } = req.body ?? {};
       if (!text || !claimId || !denialId) {
@@ -85,8 +125,7 @@ export const createCaseRouter = (services: Services, ehr: EHRPort): Router => {
     }
   });
 
-  // Scheduled-style poll run (also invokable on demand).
-  router.post('/run/poll', async (req, res, next) => {
+  router.post('/run/poll', requirePermission('run_pipeline'), async (req, res, next) => {
     try {
       jobs.enqueue('poll_denials', { since: req.body?.since });
       const processed = await jobs.drain();
@@ -96,34 +135,72 @@ export const createCaseRouter = (services: Services, ehr: EHRPort): Router => {
     }
   });
 
-  // Submission handoff for an approved case.
-  router.post('/cases/:id/submit', (req, res, next) => {
+  // --- Handoff generation (generate_handoff). NOT submission. ---
+
+  router.post('/cases/:id/handoff', requirePermission('generate_handoff'), (req, res, next) => {
     try {
-      const actor = (req.body?.actor as string) || 'user';
-      const pkg = buildSubmissionPackage(cases, audit, req.params.id, actor);
-      res.json({ ok: true, state: 'submitted', package: pkg });
+      const pkg = generateHandoff(cases, audit, req.params.id, req.authUser!.id);
+      res.json({ ok: true, state: 'handoff_generated', package: pkg });
     } catch (err) {
-      if (err instanceof SubmissionError) {
-        return res.status(409).json({ error: err.message });
-      }
+      if (err instanceof SubmissionError) return res.status(409).json({ error: err.message });
       next(err);
     }
   });
 
-  // Deadline + status summary for the dashboard.
-  router.get('/summary', (_req, res) => {
+  // Download the generated handoff artifact.
+  router.get('/cases/:id/handoff', requirePermission('view_cases'), (req, res) => {
+    const handoff = cases.getHandoff(req.params.id);
+    if (!handoff) return res.status(404).json({ error: 'no handoff generated for this case' });
+    res.setHeader('content-disposition', `attachment; filename="handoff_${req.params.id}.json"`);
+    res.json(handoff);
+  });
+
+  // --- Submission receipt (record_submission). Marks submitted. ---
+
+  router.post('/cases/:id/submit', requirePermission('record_submission'), (req, res, next) => {
+    try {
+      const { channel, confirmationNumber, submittedAt, note } = req.body ?? {};
+      const result = recordSubmission(cases, audit, req.params.id, req.authUser!.id, {
+        channel,
+        confirmationNumber,
+        submittedAt,
+        note,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      if (err instanceof SubmissionError) return res.status(409).json({ error: err.message });
+      next(err);
+    }
+  });
+
+  // --- Summary + deadlines (view_cases) ---
+
+  router.get('/summary', requirePermission('view_cases'), (_req, res) => {
     const now = new Date().toISOString().slice(0, 10);
     const all = cases.listCases();
-    const deadlines = all
-      .filter((c) => c.classification?.appealDeadline)
-      .map((c) => ({
+
+    const deadlines = all.map((c) => {
+      const cls = c.classification;
+      const deadline = cls?.appealDeadline ?? null;
+      const known = cls?.deadlineStatus === 'calculated' && Boolean(deadline);
+      return {
         caseId: c.id,
         denialId: c.denialId,
         state: c.state,
-        appealDeadline: c.classification!.appealDeadline,
-        daysRemaining: daysUntil(c.classification!.appealDeadline, now),
-      }))
-      .sort((a, b) => a.daysRemaining - b.daysRemaining);
+        deadlineKnown: known,
+        appealDeadline: deadline,
+        deadlineStatus: cls?.deadlineStatus ?? null,
+        deadlineBlockers: cls?.deadlineBlockers ?? [],
+        daysRemaining: known ? daysUntil(deadline, now) : null,
+      };
+    });
+
+    // Urgency retained until a submission receipt is recorded (state 'submitted').
+    const open = (s: AppealCaseState) => OPEN_FOR_DEADLINE.includes(s);
+    const urgentDeadlines = deadlines.filter(
+      (d) => d.deadlineKnown && open(d.state as AppealCaseState) && (d.daysRemaining ?? 99) <= 14,
+    );
+    const unknownDeadlines = deadlines.filter((d) => !d.deadlineKnown && open(d.state as AppealCaseState));
 
     const byState: Record<string, number> = {};
     for (const c of all) byState[c.state] = (byState[c.state] ?? 0) + 1;
@@ -131,16 +208,22 @@ export const createCaseRouter = (services: Services, ehr: EHRPort): Router => {
     res.json({
       total: all.length,
       byState,
-      packetsReady: all.filter((c) => c.state === 'packet_ready').length,
-      approved: all.filter((c) => c.state === 'approved').length,
-      submitted: all.filter((c) => c.state === 'submitted').length,
-      urgentDeadlines: deadlines.filter((d) => d.daysRemaining <= 14 && d.state !== 'submitted'),
-      deadlines,
+      packetsReady: byState['packet_ready'] ?? 0,
+      needsReview: byState['needs_review'] ?? 0,
+      approved: byState['approved'] ?? 0,
+      handoffGenerated: byState['handoff_generated'] ?? 0,
+      submitted: byState['submitted'] ?? 0,
+      urgentDeadlines,
+      unknownDeadlines,
+      deadlines: deadlines.sort((a, b) => {
+        // Known deadlines first (by urgency), then unknowns.
+        if (a.deadlineKnown && b.deadlineKnown) return (a.daysRemaining ?? 0) - (b.daysRemaining ?? 0);
+        return a.deadlineKnown ? -1 : 1;
+      }),
     });
   });
 
-  // Job visibility.
-  router.get('/jobs', (_req, res) => {
+  router.get('/jobs', requirePermission('view_cases'), (_req, res) => {
     res.json({ jobs: jobs.listJobs() });
   });
 

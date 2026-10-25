@@ -23,7 +23,8 @@ export interface AppealPacket {
   carrier: string;
   category: string;
   appealRoute: string | null;
-  appealDeadline: string;
+  /** Null when the deadline could not be calculated (see classification.deadlineStatus). */
+  appealDeadline: string | null;
   classification: Classification;
   gate: GateResult;
   evidence: PacketEvidenceItem[];

@@ -2,20 +2,28 @@
  * Job runner — durable queue over the `jobs` table.
  *
  * Supports:
- *   - on-demand `process_denial` jobs (staff point at a denial),
- *   - scheduled `poll_denials` jobs that discover new denials via EHRPort and
- *     enqueue a process_denial job per new denial.
+ *   - on-demand `process_denial` jobs,
+ *   - scheduled `poll_denials` jobs that discover denials via EHRPort and
+ *     enqueue a process_denial job per denial.
  *
- * Idempotency: process_denial jobs carry an idempotency key (the denial id) and
- * the unique index on jobs.idempotency_key prevents duplicate enqueues; the
- * orchestrator additionally refuses to reprocess a denial that already has a
- * case. Failed jobs are retried up to maxAttempts, then surfaced as 'failed'.
+ * Hardening:
+ *   - Payloads are ENCRYPTED at rest (payload_enc); they can contain denial
+ *     narrative PHI. Legacy plaintext payloads are tolerated on read.
+ *   - Idempotency via unique idempotency_key; the orchestrator additionally
+ *     resumes a failed/mid-flight case rather than reprocessing a completed one.
+ *   - RETRY actually repairs: after processing, the job only succeeds if the
+ *     case reached a non-failed state. A case left 'failed' fails the job so it
+ *     retries, and surfaces after maxAttempts.
+ *   - RESTART RECOVERY: recoverInterrupted() requeues jobs stuck in 'running'
+ *     (a crash mid-execution) so they resume safely under idempotency.
  */
 
 import type { Db } from '../db/index.ts';
+import { encryptField, decryptField } from '../db/crypto.ts';
 import type { OrchestratorDeps } from '../pipeline/orchestrator.ts';
 import { processDenial } from '../pipeline/orchestrator.ts';
 import type { AuditRepository } from '../repositories/auditRepository.ts';
+import type { CaseRepository } from '../repositories/caseRepository.ts';
 
 export type JobType = 'process_denial' | 'poll_denials';
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
@@ -43,12 +51,16 @@ export class JobRunner {
     private readonly db: Db,
     private readonly deps: OrchestratorDeps,
     private readonly audit: AuditRepository,
+    private readonly encKey: string,
     options: JobRunnerOptions = {},
   ) {
     this.maxAttempts = options.maxAttempts ?? 3;
   }
 
-  /** Enqueue a job. Returns the job id, or an existing id if idempotent-deduped. */
+  private get cases(): CaseRepository {
+    return this.deps.cases;
+  }
+
   enqueue(type: JobType, payload: unknown, idempotencyKey?: string): string {
     if (idempotencyKey) {
       const existing = this.db
@@ -60,14 +72,13 @@ export class JobRunner {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO jobs (id, type, payload, status, attempts, idempotency_key, created_at, updated_at)
-         VALUES (?, ?, ?, 'queued', 0, ?, ?, ?)`,
+        `INSERT INTO jobs (id, type, payload, payload_enc, status, attempts, idempotency_key, created_at, updated_at)
+         VALUES (?, ?, '', ?, 'queued', 0, ?, ?, ?)`,
       )
-      .run(id, type, JSON.stringify(payload), idempotencyKey ?? null, now, now);
+      .run(id, type, encryptField(JSON.stringify(payload), this.encKey), idempotencyKey ?? null, now, now);
     return id;
   }
 
-  /** Enqueue an on-demand denial processing job (idempotent on denial id). */
   enqueueProcessDenial(denial: unknown, denialId: string): string {
     return this.enqueue('process_denial', { denial }, `denial:${denialId}`);
   }
@@ -84,11 +95,30 @@ export class JobRunner {
     return rows.map((r) => this.mapRow(r));
   }
 
+  /**
+   * Restart recovery: any job left 'running' when the process died is requeued
+   * so it resumes. Safe because processing is idempotent (case-level resume).
+   * Returns the number of jobs recovered.
+   */
+  recoverInterrupted(): number {
+    const stuck = this.db.prepare("SELECT id FROM jobs WHERE status = 'running'").all() as any[];
+    const now = new Date().toISOString();
+    const update = this.db.prepare("UPDATE jobs SET status='queued', updated_at=? WHERE id=?");
+    for (const row of stuck) update.run(now, row.id);
+    if (stuck.length > 0) {
+      this.audit.log({
+        caseId: null,
+        actor: 'system',
+        action: 'job_recovery',
+        detail: `requeued ${stuck.length} interrupted job(s)`,
+      });
+    }
+    return stuck.length;
+  }
+
   /** Process all queued jobs once (drains the queue). Returns processed count. */
   async drain(): Promise<number> {
     let processed = 0;
-    // Re-query each loop because poll jobs enqueue new process jobs.
-    // Guard against infinite loops with a hard cap.
     for (let guard = 0; guard < 10_000; guard++) {
       const next = this.db
         .prepare("SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1")
@@ -102,18 +132,22 @@ export class JobRunner {
 
   private async runOne(job: JobRow): Promise<void> {
     this.setStatus(job.id, 'running', job.attempts + 1);
+    const attempts = job.attempts + 1;
     try {
       if (job.type === 'process_denial') {
-        await processDenial(this.deps, job.payload.denial);
+        const result = await processDenial(this.deps, job.payload.denial);
+        // Retry correctness: a job is only 'done' if the case did NOT end failed.
+        if (result.state === 'failed') {
+          throw new Error(`case ${result.caseId} ended in failed state`);
+        }
       } else if (job.type === 'poll_denials') {
         await this.handlePoll(job);
       }
-      this.setStatus(job.id, 'done', job.attempts + 1);
+      this.setStatus(job.id, 'done', attempts);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const attempts = job.attempts + 1;
       if (attempts < this.maxAttempts) {
-        this.setStatus(job.id, 'queued', attempts, message); // retry
+        this.setStatus(job.id, 'queued', attempts, message); // retry/repair
       } else {
         this.setStatus(job.id, 'failed', attempts, message);
         this.audit.log({
@@ -147,10 +181,15 @@ export class JobRunner {
   }
 
   private mapRow(row: any): JobRow {
+    // Prefer encrypted payload; tolerate legacy plaintext.
+    const payloadJson =
+      row.payload_enc != null && row.payload_enc !== ''
+        ? decryptField(row.payload_enc, this.encKey)
+        : row.payload || '{}';
     return {
       id: row.id,
       type: row.type,
-      payload: JSON.parse(row.payload),
+      payload: JSON.parse(payloadJson),
       status: row.status,
       attempts: row.attempts,
       lastError: row.last_error,

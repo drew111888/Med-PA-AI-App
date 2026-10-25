@@ -14,7 +14,7 @@ const KEY = 'test-enc-key';
 
 const makeDeps = (db = openTestDb()): { deps: OrchestratorDeps; audit: AuditRepository; db: typeof db } => {
   const cases = new CaseRepository(db, KEY);
-  const audit = new AuditRepository(db);
+  const audit = new AuditRepository(db, KEY);
   const deps: OrchestratorDeps = {
     ehr: new SyntheticEhrAdapter(),
     payerPolicy: new SyntheticPayerPolicyAdapter(),
@@ -28,7 +28,7 @@ const makeDeps = (db = openTestDb()): { deps: OrchestratorDeps; audit: AuditRepo
 describe('on-demand process_denial', () => {
   it('produces a packet for an appeal-ready denial', async () => {
     const { deps, audit, db } = makeDeps();
-    const runner = new JobRunner(db, deps, audit);
+    const runner = new JobRunner(db, deps, audit, KEY);
     const medNecessity = DENIALS.find((d) => d.id === 'den_001')!; // CARC 50, pat_001 ready
 
     const jobId = runner.enqueueProcessDenial(medNecessity, medNecessity.id);
@@ -43,14 +43,14 @@ describe('on-demand process_denial', () => {
 
   it('stops at gate for a needs-more-data denial (no packet)', async () => {
     const { deps, audit, db } = makeDeps();
-    const runner = new JobRunner(db, deps, audit);
+    const runner = new JobRunner(db, deps, audit, KEY);
     const missingInfo = DENIALS.find((d) => d.id === 'den_003')!; // knee, sparse chart
 
     runner.enqueueProcessDenial(missingInfo, missingInfo.id);
     await runner.drain();
 
     const case_ = deps.cases.getCaseByDenial('den_003');
-    expect(case_?.state).toBe('gated');
+    expect(case_?.state).toBe('needs_more_data');
     expect(case_?.gate?.decision).toBe('needs_more_data');
     expect(case_?.packet).toBeNull();
     db.close();
@@ -60,7 +60,7 @@ describe('on-demand process_denial', () => {
 describe('idempotency', () => {
   it('dedupes enqueue on denial id', async () => {
     const { deps, audit, db } = makeDeps();
-    const runner = new JobRunner(db, deps, audit);
+    const runner = new JobRunner(db, deps, audit, KEY);
     const d = DENIALS[0];
     const a = runner.enqueueProcessDenial(d, d.id);
     const b = runner.enqueueProcessDenial(d, d.id);
@@ -71,7 +71,7 @@ describe('idempotency', () => {
 
   it('does not reprocess a denial that already has a case', async () => {
     const { deps, audit, db } = makeDeps();
-    const runner = new JobRunner(db, deps, audit);
+    const runner = new JobRunner(db, deps, audit, KEY);
     const d = DENIALS[0];
     runner.enqueueProcessDenial(d, d.id);
     await runner.drain();
@@ -88,7 +88,7 @@ describe('idempotency', () => {
 describe('scheduled poll', () => {
   it('discovers denials and enqueues a process job each, producing cases', async () => {
     const { deps, audit, db } = makeDeps();
-    const runner = new JobRunner(db, deps, audit);
+    const runner = new JobRunner(db, deps, audit, KEY);
 
     runner.enqueue('poll_denials', { since: undefined });
     const processed = await runner.drain();
@@ -115,7 +115,7 @@ describe('retry + failure surfacing', () => {
         async discoverDenials() { return []; },
       },
     };
-    const runner = new JobRunner(db, brokenDeps, audit, { maxAttempts: 2 });
+    const runner = new JobRunner(db, brokenDeps, audit, KEY, { maxAttempts: 2 });
     const d = DENIALS[0];
     const jobId = runner.enqueue('process_denial', { denial: d }, `denial:${d.id}`);
     await runner.drain();
@@ -126,6 +126,68 @@ describe('retry + failure surfacing', () => {
     expect(job?.lastError).toMatch(/boom/);
     const failures = audit.all().filter((a) => a.action === 'job_failed');
     expect(failures.length).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('a retry repairs a previously failed case instead of reporting success', async () => {
+    const { deps, audit, db } = makeDeps();
+    // EHR that fails the first getClaim call, then succeeds (transient failure).
+    const realEhr = new SyntheticEhrAdapter();
+    let calls = 0;
+    const flakyDeps: OrchestratorDeps = {
+      ...deps,
+      ehr: {
+        name: 'flaky',
+        getPatient: (id: string) => realEhr.getPatient(id),
+        getClaim: (id: string) => {
+          calls++;
+          if (calls === 1) throw new Error('transient');
+          return realEhr.getClaim(id);
+        },
+        getChartDocuments: (p: string, c?: string) => realEhr.getChartDocuments(p, c),
+        discoverDenials: (s?: string) => realEhr.discoverDenials(s),
+      },
+    };
+    const runner = new JobRunner(db, flakyDeps, audit, KEY, { maxAttempts: 3 });
+    const d = DENIALS.find((x) => x.id === 'den_001')!;
+    const jobId = runner.enqueueProcessDenial(d, d.id);
+    await runner.drain();
+
+    // First attempt failed; retry resumed and repaired the case to packet_ready.
+    const job = runner.getJob(jobId);
+    expect(job?.status).toBe('done');
+    expect(job?.attempts).toBeGreaterThanOrEqual(2);
+    expect(flakyDeps.cases.getCaseByDenial('den_001')?.state).toBe('packet_ready');
+    db.close();
+  });
+
+  it('encrypts job payloads at rest', () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+    const d = DENIALS.find((x) => x.id === 'den_001')!; // has rawText PHI-ish narrative
+    runner.enqueueProcessDenial(d, d.id);
+    const raw = db.prepare('SELECT payload, payload_enc FROM jobs LIMIT 1').get() as any;
+    expect(raw.payload_enc.startsWith('enc:v1:')).toBe(true);
+    expect(raw.payload_enc).not.toContain('medically necessary');
+    expect(raw.payload).toBe('');
+    db.close();
+  });
+
+  it('recoverInterrupted requeues jobs stuck running and resumes them', async () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+    const d = DENIALS.find((x) => x.id === 'den_001')!;
+    const jobId = runner.enqueueProcessDenial(d, d.id);
+    // Simulate a crash mid-run: force the job to 'running' and never finished.
+    db.prepare("UPDATE jobs SET status='running' WHERE id=?").run(jobId);
+
+    const recovered = runner.recoverInterrupted();
+    expect(recovered).toBe(1);
+    expect(runner.getJob(jobId)?.status).toBe('queued');
+
+    await runner.drain();
+    expect(runner.getJob(jobId)?.status).toBe('done');
+    expect(deps.cases.getCaseByDenial('den_001')?.state).toBe('packet_ready');
     db.close();
   });
 });

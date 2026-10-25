@@ -4,7 +4,6 @@ import {
   classifyWithPolicy,
   addDays,
   daysUntil,
-  DEFAULT_APPEAL_WINDOW_DAYS,
 } from './classifier.ts';
 import { SyntheticPayerPolicyAdapter } from '../adapters/synthetic/syntheticPayerPolicyAdapter.ts';
 import type { Denial, PayerPolicy, Claim } from '../domain/types.ts';
@@ -42,6 +41,10 @@ describe('date math', () => {
     expect(daysUntil('2026-11-30', '2026-10-01')).toBe(60);
     expect(daysUntil('2026-10-01', '2026-10-10')).toBe(-9);
     expect(daysUntil('2026-10-01', '2026-10-01')).toBe(0);
+  });
+
+  it('daysUntil returns null for an unknown deadline', () => {
+    expect(daysUntil(null, '2026-10-01')).toBeNull();
   });
 
   it('addDays rejects invalid input', () => {
@@ -91,15 +94,26 @@ describe('classifyDenial — table driven', () => {
   it('computes deadline from policy window', () => {
     const result = classifyDenial(denial(['50'], { denialDate: '2026-10-01' }), policy({ appealWindowDays: 60 }));
     expect(result.appealDeadline).toBe('2026-11-30');
+    expect(result.deadlineStatus).toBe('calculated');
     expect(result.appealRoute).toBe('test_route');
     expect(result.policyId).toBe('pol');
   });
 
-  it('falls back to default window and null route with no policy', () => {
+  it('deadline is UNKNOWN with no policy (never fabricated)', () => {
     const result = classifyDenial(denial(['50']), null);
-    expect(result.appealWindowDays).toBe(DEFAULT_APPEAL_WINDOW_DAYS);
+    expect(result.appealDeadline).toBeNull();
+    expect(result.deadlineStatus).toBe('unknown_missing_policy');
+    expect(result.appealWindowDays).toBeNull();
     expect(result.appealRoute).toBeNull();
     expect(result.policyId).toBeNull();
+    expect(result.deadlineBlockers.join(' ')).toMatch(/appeal-window rule/);
+  });
+
+  it('deadline is UNKNOWN with no denial date (never fabricated)', () => {
+    const result = classifyDenial(denial(['50'], { denialDate: null }), policy({ appealWindowDays: 60 }));
+    expect(result.appealDeadline).toBeNull();
+    expect(result.deadlineStatus).toBe('unknown_missing_date');
+    expect(result.deadlineBlockers).toContain('denial date');
   });
 
   it('separates recognized from unrecognized codes', () => {

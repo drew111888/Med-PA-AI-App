@@ -44,15 +44,17 @@ export const processDenial = async (
   const { ehr, payerPolicy, ai, cases, audit } = deps;
   const caseId = newCaseId(denial.id);
 
-  // Idempotency at the case level: if a case already exists for this denial,
-  // do not reprocess.
+  // Idempotency: a case that already reached a terminal/human-owned state is NOT
+  // reprocessed. But a 'failed' case (or one left mid-flight by a crash) MUST be
+  // resumed/repaired rather than reported as success.
   const existing = cases.getCaseByDenial(denial.id);
-  if (existing) {
+  const RESUMABLE = new Set(['failed', 'intake', 'classified', 'gathering', 'gated', 'reasoning']);
+  if (existing && !RESUMABLE.has(existing.state)) {
     return {
       caseId: existing.id,
       state: existing.state,
       gateDecision: existing.gate?.decision ?? null,
-      packetReady: existing.state === 'packet_ready' || existing.state === 'approved',
+      packetReady: existing.state === 'packet_ready',
     };
   }
 
@@ -65,8 +67,14 @@ export const processDenial = async (
   cases.upsertPatient(patient);
   cases.upsertClaim(claim);
   cases.insertDenial(denial);
-  cases.createCase(caseId, denial.id, 'intake');
-  audit.log({ caseId, actor: 'system', action: 'intake', detail: `denial ${denial.id} ingested` });
+  if (!existing) {
+    cases.createCase(caseId, denial.id, 'intake');
+    audit.log({ caseId, actor: 'system', action: 'intake', detail: `denial ${denial.id} ingested` });
+  } else {
+    // Resuming: reset to intake and record the repair attempt.
+    cases.updateCase(caseId, { state: 'intake' });
+    audit.log({ caseId, actor: 'system', action: 'resume', detail: `resuming from ${existing.state}` });
+  }
 
   try {
     // 1. Classify (deterministic).
@@ -97,11 +105,26 @@ export const processDenial = async (
       return { caseId, state: 'ineligible', gateDecision: gate.decision, packetReady: false };
     }
     if (gate.decision !== 'appeal_ready') {
+      cases.updateCase(caseId, { state: 'needs_more_data' });
       audit.log({ caseId, actor: 'system', action: 'stopped', detail: gate.decision });
-      return { caseId, state: 'gated', gateDecision: gate.decision, packetReady: false };
+      return { caseId, state: 'needs_more_data', gateDecision: gate.decision, packetReady: false };
     }
 
-    // 4. AI reasoning (only when appeal_ready).
+    // 3b. Deadline gate: we will not draft an appeal we cannot time. If the
+    //     deadline is not calculable (missing date or missing carrier rule),
+    //     hold for human review BEFORE any AI call. Never fabricate a deadline.
+    if (classification.deadlineStatus !== 'calculated' || !classification.appealDeadline) {
+      cases.updateCase(caseId, { state: 'needs_review' });
+      audit.log({
+        caseId,
+        actor: 'system',
+        action: 'needs_review',
+        detail: `deadline ${classification.deadlineStatus}; blockers: ${classification.deadlineBlockers.join(', ')}`,
+      });
+      return { caseId, state: 'needs_review', gateDecision: gate.decision, packetReady: false };
+    }
+
+    // 4. AI reasoning (only when appeal_ready AND deadline known).
     cases.updateCase(caseId, { state: 'reasoning' });
     const reasoning = await runReasoning(ai, { patient, classification, gate, policy, chart });
     audit.log({
@@ -111,12 +134,37 @@ export const processDenial = async (
       detail: `provider ${reasoning.provider}; validation ${reasoning.validation.valid ? 'pass' : 'fail'}`,
     });
 
-    // 5. Build + persist packet.
+    // 5. Build + persist packet (versioned). Fail closed on AI validation:
+    //    a packet whose AI output failed validation goes to 'needs_review' and
+    //    is NOT approvable until a human remediates and re-runs.
     const packet = buildPacket({ caseId, denial, patient, classification, gate, reasoning });
-    cases.updateCase(caseId, { state: 'packet_ready', packet });
-    audit.log({ caseId, actor: 'system', action: 'packet_ready', detail: `evidence ${packet.evidence.length}` });
 
-    return { caseId, state: 'packet_ready', gateDecision: gate.decision, packetReady: true };
+    // Guard: a packet with a known deadline requirement but no deadline, or with
+    // no evidence, is incomplete and must not be presented as ready.
+    const complete = isPacketComplete(packet);
+    const readyState: 'packet_ready' | 'needs_review' =
+      reasoning.validation.valid && complete.ok ? 'packet_ready' : 'needs_review';
+
+    cases.updateCase(caseId, { state: readyState, packet });
+    audit.log({
+      caseId,
+      actor: 'system',
+      action: readyState,
+      detail:
+        readyState === 'packet_ready'
+          ? `evidence ${packet.evidence.length}; validated`
+          : `held for review: ${[
+              ...(reasoning.validation.valid ? [] : ['ai_validation_failed']),
+              ...complete.issues,
+            ].join(', ')}`,
+    });
+
+    return {
+      caseId,
+      state: readyState,
+      gateDecision: gate.decision,
+      packetReady: readyState === 'packet_ready',
+    };
   } catch (err) {
     cases.updateCase(caseId, { state: 'failed' });
     audit.log({
@@ -127,4 +175,22 @@ export const processDenial = async (
     });
     throw err;
   }
+};
+
+/** Deterministic completeness check — required before a packet is approvable. */
+export const isPacketComplete = (packet: {
+  evidence: unknown[];
+  draftLetter: string;
+  appealDeadline: string | null;
+  classification: { deadlineStatus: string };
+}): { ok: boolean; issues: string[] } => {
+  const issues: string[] = [];
+  if (!packet.draftLetter || packet.draftLetter.trim().length < 40) issues.push('empty_draft');
+  if (!packet.evidence || packet.evidence.length === 0) issues.push('no_evidence');
+  // A calculated deadline must actually be present; an unknown deadline is a
+  // review blocker (a human must supply the missing date/rule first).
+  if (packet.classification.deadlineStatus !== 'calculated' || !packet.appealDeadline) {
+    issues.push('deadline_unknown');
+  }
+  return { ok: issues.length === 0, issues };
 };

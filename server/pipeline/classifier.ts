@@ -15,8 +15,16 @@ import type { Denial, PayerPolicy, Claim, DenialCategory } from '../domain/types
 import type { PayerPolicyPort } from '../ports/payerPolicyPort.ts';
 import { dominantCategory, lookupCarc } from './carcCatalog.ts';
 
-/** Default appeal window when no payer policy is known (conservative). */
-export const DEFAULT_APPEAL_WINDOW_DAYS = 60;
+/**
+ * Deadline status — a deadline is only "calculated" when BOTH a denial date and
+ * a carrier appeal window (from a resolved policy) are known. We NEVER fabricate
+ * a deadline from "today" or a default window; missing inputs yield "unknown"
+ * and name exactly what is missing so a human can supply it.
+ */
+export type DeadlineStatus =
+  | 'calculated' // denialDate + policy window both known
+  | 'unknown_missing_date' // no usable denial date
+  | 'unknown_missing_policy'; // no carrier policy/window resolved
 
 export interface Classification {
   category: DenialCategory;
@@ -25,9 +33,16 @@ export interface Classification {
   recognizedCodes: string[];
   /** CARC codes not present in the catalog. */
   unrecognizedCodes: string[];
-  /** ISO date the appeal must be filed by. */
-  appealDeadline: string;
-  appealWindowDays: number;
+  /** ISO date the appeal must be filed by, or null when it cannot be calculated. */
+  appealDeadline: string | null;
+  /** Why the deadline is (not) known. */
+  deadlineStatus: DeadlineStatus;
+  /** The appeal window in days when a policy resolved it, else null. */
+  appealWindowDays: number | null;
+  /** The denial date used (echoed for transparency), or null when missing. */
+  denialDate: string | null;
+  /** What must be supplied before a deadline can be claimed (empty if calculated). */
+  deadlineBlockers: string[];
   /** Named carrier route, or null when no policy resolved. */
   appealRoute: string | null;
   /** Policy id used, if any. */
@@ -46,8 +61,13 @@ export const addDays = (isoDate: string, days: number): string => {
   return result.toISOString().slice(0, 10);
 };
 
-/** Days remaining until the deadline from a given "now" (negative = past due). */
-export const daysUntil = (deadlineIso: string, nowIso: string): number => {
+/**
+ * Days remaining until the deadline from a given "now". Null-safe: an unknown
+ * deadline yields null (callers must render "unknown", never a number).
+ * Negative = past due.
+ */
+export const daysUntil = (deadlineIso: string | null, nowIso: string): number | null => {
+  if (!deadlineIso) return null;
   const deadline = Date.parse(deadlineIso + 'T00:00:00Z');
   const now = Date.parse(nowIso.length === 10 ? nowIso + 'T00:00:00Z' : nowIso);
   return Math.floor((deadline - now) / (24 * 60 * 60 * 1000));
@@ -65,11 +85,30 @@ export const classifyDenial = (denial: Denial, policy: PayerPolicy | null): Clas
     category !== 'non_appealable' &&
     recognizedCodes.some((c) => lookupCarc(c)?.appealable);
 
-  const appealWindowDays = policy?.appealWindowDays ?? DEFAULT_APPEAL_WINDOW_DAYS;
-  const appealDeadline = addDays(denial.denialDate, appealWindowDays);
   const appealRoute = policy?.appealRoute ?? null;
+  const appealWindowDays = policy?.appealWindowDays ?? null;
+  const denialDate = denial.denialDate ?? null;
 
-  const rationale = buildRationale(category, appealable, policy, unrecognizedCodes);
+  // A deadline is ONLY calculated when both inputs exist. Never fabricate.
+  const deadlineBlockers: string[] = [];
+  let appealDeadline: string | null = null;
+  let deadlineStatus: DeadlineStatus;
+
+  if (!denialDate) deadlineBlockers.push('denial date');
+  if (appealWindowDays === null) {
+    deadlineBlockers.push(`carrier appeal-window rule for ${denial.carrier}`);
+  }
+
+  if (denialDate && appealWindowDays !== null) {
+    appealDeadline = addDays(denialDate, appealWindowDays);
+    deadlineStatus = 'calculated';
+  } else if (!denialDate) {
+    deadlineStatus = 'unknown_missing_date';
+  } else {
+    deadlineStatus = 'unknown_missing_policy';
+  }
+
+  const rationale = buildRationale(category, appealable, policy, unrecognizedCodes, deadlineStatus);
 
   return {
     category,
@@ -77,7 +116,10 @@ export const classifyDenial = (denial: Denial, policy: PayerPolicy | null): Clas
     recognizedCodes,
     unrecognizedCodes,
     appealDeadline,
+    deadlineStatus,
     appealWindowDays,
+    denialDate,
+    deadlineBlockers,
     appealRoute,
     policyId: policy?.id ?? null,
     rationale,
@@ -89,6 +131,7 @@ const buildRationale = (
   appealable: boolean,
   policy: PayerPolicy | null,
   unrecognized: string[],
+  deadlineStatus: DeadlineStatus,
 ): string => {
   const parts: string[] = [];
   parts.push(`Classified as ${category.replace(/_/g, ' ')}.`);
@@ -96,8 +139,13 @@ const buildRationale = (
   parts.push(
     policy
       ? `Using carrier policy "${policy.title}" (window ${policy.appealWindowDays}d, route ${policy.appealRoute}).`
-      : `No carrier policy resolved; using default ${DEFAULT_APPEAL_WINDOW_DAYS}d window and no route.`,
+      : 'No carrier policy resolved; appeal window and route are unknown.',
   );
+  if (deadlineStatus === 'unknown_missing_date') {
+    parts.push('Appeal deadline UNKNOWN: denial date is missing.');
+  } else if (deadlineStatus === 'unknown_missing_policy') {
+    parts.push('Appeal deadline UNKNOWN: no carrier appeal-window rule resolved.');
+  }
   if (unrecognized.length) {
     parts.push(`Unrecognized CARC codes present: ${unrecognized.join(', ')}.`);
   }

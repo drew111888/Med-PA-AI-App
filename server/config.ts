@@ -41,6 +41,10 @@ export interface AppConfig {
   allowCloudAi: boolean;
   /** Absolute path to the built client assets (served in production mode). */
   clientDistPath: string;
+  /** Scheduler poll interval in ms. 0 disables periodic polling. */
+  pollIntervalMs: number;
+  /** Whether the background scheduler should start with the server. */
+  enableScheduler: boolean;
   /** True when running under a test runner. */
   isTest: boolean;
 }
@@ -81,6 +85,9 @@ export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
     aiProvider: (process.env.MEDAUTH_AI_PROVIDER as AiProviderName) || 'local',
     allowCloudAi: toBool(process.env.MEDAUTH_ALLOW_CLOUD_AI, false),
     clientDistPath: process.env.MEDAUTH_CLIENT_DIST || path.resolve(process.cwd(), 'dist'),
+    pollIntervalMs: toInt(process.env.MEDAUTH_POLL_INTERVAL_MS, 5 * 60 * 1000),
+    // Scheduler runs with the server by default, but never under tests.
+    enableScheduler: isTest ? false : toBool(process.env.MEDAUTH_ENABLE_SCHEDULER, true),
     isTest,
     ...overrides,
   };

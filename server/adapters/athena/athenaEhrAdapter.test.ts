@@ -106,7 +106,7 @@ describe('pipeline runs unchanged against Athena adapter', () => {
       payerPolicy: new SyntheticPayerPolicyAdapter(),
       ai: new DeidentifyingProvider(new LocalAiProvider()),
       cases: new CaseRepository(db, 'k'),
-      audit: new AuditRepository(db),
+      audit: new AuditRepository(db, 'k'),
     };
     const [denial] = await deps.ehr.discoverDenials();
     const result = await processDenial(deps, denial);

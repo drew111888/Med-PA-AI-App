@@ -7,6 +7,7 @@
  * is encrypted as a unit).
  */
 
+import crypto from 'node:crypto';
 import type { Db } from '../db/index.ts';
 import { encryptField, decryptField } from '../db/crypto.ts';
 import type { Patient, Claim, Denial, AppealCaseState } from '../domain/types.ts';
@@ -21,9 +22,36 @@ export interface AppealCaseRow {
   classification: Classification | null;
   gate: GateResult | null;
   packet: AppealPacket | null;
+  /** Monotonic version of the current packet. Bumps when packet content changes. */
+  packetVersion: number;
+  /** Content hash of the current packet, used to detect edits. */
+  packetHash: string | null;
+  /** The packet version that was approved (null if not approved / stale). */
+  approvedVersion: number | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  /** The packet version a handoff package was generated from. */
+  handoffVersion: number | null;
+  handoffGeneratedAt: string | null;
+  /** True when a handoff artifact exists (content fetched separately). */
+  hasHandoff: boolean;
+  submittedBy: string | null;
+  submittedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Stable content hash of the parts of a packet that gate approval. */
+export const hashPacket = (packet: AppealPacket): string => {
+  const material = JSON.stringify({
+    evidence: packet.evidence,
+    draftLetter: packet.draftLetter,
+    appealDeadline: packet.appealDeadline,
+    appealRoute: packet.appealRoute,
+    category: packet.category,
+  });
+  return crypto.createHash('sha256').update(material).digest('hex');
+};
 
 export class CaseRepository {
   constructor(
@@ -132,18 +160,109 @@ export class CaseRepository {
     const classification = patch.classification ?? current.classification;
     const gate = patch.gate ?? current.gate;
     const packet = patch.packet ?? current.packet;
+
+    // Versioning: if the packet content changed, bump the version and hash, and
+    // invalidate any prior approval (editing evidence/draft voids approval).
+    let packetVersion = current.packetVersion;
+    let packetHash = current.packetHash;
+    let approvedVersion = current.approvedVersion;
+    let approvedBy = current.approvedBy;
+    let approvedAt = current.approvedAt;
+
+    if (patch.packet) {
+      const newHash = hashPacket(patch.packet);
+      if (newHash !== current.packetHash) {
+        packetVersion = current.packetVersion + 1;
+        packetHash = newHash;
+        // A changed packet invalidates a prior approval.
+        approvedVersion = null;
+        approvedBy = null;
+        approvedAt = null;
+      }
+    }
+
     this.db
       .prepare(
-        `UPDATE appeal_cases SET state=?, classification=?, gate_decision=?, packet=?, updated_at=? WHERE id=?`,
+        `UPDATE appeal_cases
+         SET state=?, classification=?, gate_decision=?, packet=?,
+             packet_version=?, packet_hash=?,
+             approved_version=?, approved_by=?, approved_at=?,
+             updated_at=?
+         WHERE id=?`,
       )
       .run(
         state,
         classification ? JSON.stringify(classification) : null,
         gate ? JSON.stringify(gate) : null,
         packet ? encryptField(JSON.stringify(packet), this.encKey) : null,
+        packetVersion,
+        packetHash,
+        approvedVersion,
+        approvedBy,
+        approvedAt,
         new Date().toISOString(),
         id,
       );
+  }
+
+  /**
+   * Record human approval of a SPECIFIC packet version. Rejects (returns a
+   * reason) if the version is stale or the case is not approvable. Idempotent-
+   * safe: re-approving the same already-approved version is a conflict.
+   */
+  approve(id: string, actorUserId: string, expectedVersion: number): { ok: boolean; reason?: string } {
+    const c = this.getCase(id);
+    if (!c) return { ok: false, reason: 'case not found' };
+    if (c.state !== 'packet_ready') {
+      return { ok: false, reason: `cannot approve from state ${c.state}` };
+    }
+    if (expectedVersion !== c.packetVersion) {
+      return {
+        ok: false,
+        reason: `stale approval: expected version ${expectedVersion}, current is ${c.packetVersion}`,
+      };
+    }
+    if (c.approvedVersion === c.packetVersion) {
+      return { ok: false, reason: 'already approved' };
+    }
+    this.db
+      .prepare(
+        `UPDATE appeal_cases SET state='approved', approved_version=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?`,
+      )
+      .run(c.packetVersion, actorUserId, new Date().toISOString(), new Date().toISOString(), id);
+    return { ok: true };
+  }
+
+  /** Store a generated handoff artifact (encrypted) bound to a packet version. */
+  saveHandoff(id: string, handoff: unknown, version: number): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE appeal_cases SET state='handoff_generated', handoff_enc=?, handoff_version=?, handoff_generated_at=?, updated_at=? WHERE id=?`,
+      )
+      .run(encryptField(JSON.stringify(handoff), this.encKey), version, now, now, id);
+  }
+
+  getHandoff(id: string): unknown | null {
+    const row = this.db.prepare('SELECT handoff_enc FROM appeal_cases WHERE id=?').get(id) as any;
+    if (!row?.handoff_enc) return null;
+    return JSON.parse(decryptField(row.handoff_enc, this.encKey));
+  }
+
+  /** Record a human submission receipt; only this marks a case 'submitted'. */
+  recordSubmission(id: string, actorUserId: string, receipt: unknown): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE appeal_cases SET state='submitted', submission_receipt_enc=?, submitted_by=?, submitted_at=?, updated_at=? WHERE id=?`,
+      )
+      .run(encryptField(JSON.stringify(receipt), this.encKey), actorUserId, now, now, id);
+  }
+
+  getSubmissionReceipt(id: string): unknown | null {
+    const row = this.db.prepare('SELECT submission_receipt_enc FROM appeal_cases WHERE id=?').get(id) as any;
+    if (!row?.submission_receipt_enc) return null;
+    return JSON.parse(decryptField(row.submission_receipt_enc, this.encKey));
   }
 
   getCase(id: string): AppealCaseRow | null {
@@ -175,6 +294,16 @@ export class CaseRepository {
       classification: row.classification ? JSON.parse(row.classification) : null,
       gate: row.gate_decision ? JSON.parse(row.gate_decision) : null,
       packet: row.packet ? JSON.parse(decryptField(row.packet, this.encKey)) : null,
+      packetVersion: Number(row.packet_version ?? 0),
+      packetHash: row.packet_hash ?? null,
+      approvedVersion: row.approved_version ?? null,
+      approvedBy: row.approved_by ?? null,
+      approvedAt: row.approved_at ?? null,
+      handoffVersion: row.handoff_version ?? null,
+      handoffGeneratedAt: row.handoff_generated_at ?? null,
+      hasHandoff: Boolean(row.handoff_enc),
+      submittedBy: row.submitted_by ?? null,
+      submittedAt: row.submitted_at ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

@@ -118,7 +118,9 @@ export const intakeDenialFromPdf = async (
     carrier: carrier ?? 'Unknown',
     carcCodes: codes.carc,
     rarcCodes: codes.rarc,
-    denialDate: denialDate ?? new Date().toISOString().slice(0, 10),
+    // Never fabricate a denial date. If neither deterministic nor AI extraction
+    // produced one, leave it null so the deadline is surfaced as UNKNOWN.
+    denialDate: denialDate ?? null,
     rawText: input.text,
     externalRef: input.externalRef,
   };

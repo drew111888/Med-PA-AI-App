@@ -1,9 +1,13 @@
 /**
  * Express application factory.
  *
- * Kept separate from the listen() call so tests can exercise the app in-process.
- * In production the same app serves the built React UI from clientDistPath so
- * the whole system is reachable at a single local URL.
+ * Kept separate from listen() so tests can exercise the app in-process. In
+ * production the same app serves the built React UI from clientDistPath so the
+ * whole system is reachable at a single local URL.
+ *
+ * All data routes are authenticated and permission-checked. The former
+ * unauthenticated /api/dev/* routes (which exposed denials and chart PHI) have
+ * been removed.
  */
 
 import express, { type Express } from 'express';
@@ -14,6 +18,8 @@ import { openDb, checkDbHealth, type Db } from './db/index.ts';
 import { resolvePorts, type Ports } from './adapters/registry.ts';
 import { buildServices, type Services } from './services.ts';
 import { createCaseRouter } from './routes/caseRoutes.ts';
+import { createAuthRouter } from './auth/authRoutes.ts';
+import { seedUsersIfEmpty } from './auth/bootstrap.ts';
 import type { AiRegistryOptions } from './ai/registry.ts';
 
 export interface AppContext {
@@ -33,10 +39,13 @@ export const createApp = (
   const services = buildServices(config, database, ports, aiOptions);
   const ctx: AppContext = { config, db: database, ports, services };
 
+  // Seed synthetic users for local/synthetic development if none exist.
+  seedUsersIfEmpty(services.users);
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
-  // Health endpoint: reports process + DB connectivity.
+  // Health endpoint (unauthenticated: no PHI, connectivity only).
   app.get('/api/health', (_req, res) => {
     const dbOk = checkDbHealth(ctx.db);
     res.status(dbOk ? 200 : 503).json({
@@ -44,34 +53,16 @@ export const createApp = (
       db: dbOk ? 'connected' : 'unavailable',
       ehrAdapter: ctx.config.ehrAdapter,
       aiProvider: ctx.config.aiProvider,
+      allowCloudAi: ctx.config.allowCloudAi,
       time: new Date().toISOString(),
     });
   });
 
-  // Dev route: list discoverable denials through EHRPort (Task 2 demo).
-  app.get('/api/dev/denials', async (_req, res, next) => {
-    try {
-      const denials = await ctx.ports.ehr.discoverDenials();
-      res.json({ adapter: ctx.ports.ehr.name, count: denials.length, denials });
-    } catch (err) {
-      next(err);
-    }
-  });
+  // Authentication routes (login/logout/me).
+  app.use('/api', createAuthRouter(ctx.services.users, ctx.services.audit));
 
-  // Dev route: fetch a patient's chart through EHRPort (Task 2 demo).
-  app.get('/api/dev/patients/:id/chart', async (req, res, next) => {
-    try {
-      const patient = await ctx.ports.ehr.getPatient(req.params.id);
-      if (!patient) return res.status(404).json({ error: 'patient not found' });
-      const documents = await ctx.ports.ehr.getChartDocuments(req.params.id);
-      res.json({ patient, documentCount: documents.length, documents });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // Case / packet / job / approval API.
-  app.use('/api', createCaseRouter(ctx.services, ctx.ports.ehr));
+  // Case / packet / job / approval / handoff / submission API (all authenticated).
+  app.use('/api', createCaseRouter(ctx.services, ctx.ports.ehr, ctx.services.users));
 
   // JSON error handler for API routes.
   app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -81,8 +72,7 @@ export const createApp = (
     res.status(500).send('Internal error');
   });
 
-  // Serve the built client in production if present. In dev, Vite serves the UI
-  // on its own port; the API is consumed cross-origin from there.
+  // Serve the built client in production if present.
   const indexHtml = path.join(ctx.config.clientDistPath, 'index.html');
   if (fs.existsSync(indexHtml)) {
     app.use(express.static(ctx.config.clientDistPath));

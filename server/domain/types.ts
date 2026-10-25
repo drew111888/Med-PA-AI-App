@@ -69,7 +69,11 @@ export const DenialSchema = z.object({
   carrier: z.string(),
   carcCodes: z.array(CarcCodeSchema),
   rarcCodes: z.array(RarcCodeSchema),
-  denialDate: z.string(), // ISO date — starts the appeal clock
+  /**
+   * ISO date that starts the appeal clock. May be null when the source did not
+   * provide a usable date; the deadline is then UNKNOWN and must not be fabricated.
+   */
+  denialDate: z.string().nullable(),
   /** Original denial narrative (PHI). Optional for API-sourced structured denials. */
   rawText: z.string().optional(),
   /** Idempotency key from the source system (e.g. remittance id). */
@@ -115,13 +119,56 @@ export const AppealCaseStateSchema = z.enum([
   'gathering', // pulling chart
   'gated', // deterministic gates evaluated
   'reasoning', // AI drafting
-  'packet_ready', // reviewable packet assembled
-  'approved', // human approved
-  'submitted', // handed off to carrier
+  'packet_ready', // reviewable packet assembled AND AI-validated
+  'needs_review', // packet assembled but AI validation FAILED — human review required, not approvable
+  'approved', // human approved a specific packet version
+  'handoff_generated', // a downloadable submission package was produced (NOT submitted)
+  'submitted', // a human recorded a submission receipt to the payer
   'ineligible', // deterministic gate rejected
+  'needs_more_data', // deterministic gate: required evidence missing
   'failed', // pipeline error
 ]);
 export type AppealCaseState = z.infer<typeof AppealCaseStateSchema>;
+
+/** States from which deadline urgency should still be surfaced (not yet sent). */
+export const OPEN_FOR_DEADLINE: AppealCaseState[] = [
+  'intake',
+  'classified',
+  'gathering',
+  'gated',
+  'reasoning',
+  'packet_ready',
+  'needs_review',
+  'approved',
+  'handoff_generated',
+  'needs_more_data',
+];
+
+// --- Authorization roles ---
+
+/**
+ * Roles for server-side authorization. Aligned to the existing UI roles
+ * (ADMIN/PROVIDER/BILLER) plus a coordinator concept: BILLER acts as the appeal
+ * coordinator. Permissions are enforced on every protected API.
+ */
+export const RoleSchema = z.enum(['ADMIN', 'PROVIDER', 'BILLER']);
+export type Role = z.infer<typeof RoleSchema>;
+
+export type Permission =
+  | 'run_pipeline' // trigger intake / poll / on-demand runs
+  | 'view_cases' // read cases, packets, summary
+  | 'approve_appeal' // record human approval of a packet version
+  | 'generate_handoff' // produce a downloadable submission package
+  | 'record_submission'; // record a human submission receipt
+
+export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+  ADMIN: ['run_pipeline', 'view_cases', 'approve_appeal', 'generate_handoff', 'record_submission'],
+  // Providers own the clinical approval decision.
+  PROVIDER: ['run_pipeline', 'view_cases', 'approve_appeal', 'generate_handoff', 'record_submission'],
+  // Coordinators (billers) run the pipeline and handle submission logistics but
+  // cannot approve the clinical appeal.
+  BILLER: ['run_pipeline', 'view_cases', 'generate_handoff', 'record_submission'],
+};
 
 /** High-level category the deterministic classifier assigns. */
 export const DenialCategorySchema = z.enum([
