@@ -104,10 +104,18 @@ const Analyzer: React.FC<AnalyzerProps> = ({ onNavigate }) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const extractedData = await parsePolicyDocument(base64, file.type || 'application/pdf');
-        if (extractedData.content) setGuidelines(extractedData.content.replace(/\n/g, '<br>'));
-        if (extractedData.cptCodes?.[0]) setCptCode(extractedData.cptCodes[0]);
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          const extractedData = await parsePolicyDocument(base64, file.type || 'application/pdf');
+          if (extractedData.content) setGuidelines(extractedData.content.replace(/\n/g, '<br>'));
+          if (extractedData.cptCodes?.[0]) setCptCode(extractedData.cptCodes[0]);
+        } catch (error) {
+          /* parse failed; leave inputs unchanged */
+        } finally {
+          setIsParsing(false);
+        }
+      };
+      reader.onerror = () => {
         setIsParsing(false);
       };
     } catch (error) {

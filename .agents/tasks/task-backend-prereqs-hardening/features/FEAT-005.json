@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Defect E (minimal): the four compat AI functions in services/geminiService.ts already reject as 'not wired'. Analyzer.tsx and Appeals.tsx await that rejection INSIDE FileReader.onload, outside the outer try/catch, so a rejected/failed parse leaves the UI stuck in a parsing/loading state. Fix the error/finally handling in the two onload handlers so a failed parse always exits the loading state. This is the ONLY UI-file edit allowed in this increment. Independent of A-D (UI-only), ordered last.",
+  "status": "completed",
+  "steps": [
+    "Read components/Analyzer.tsx (handleFileUpload / reader.onload, setIsParsing) and components/Appeals.tsx (handleFileUpload / reader.onload, setParsingDoc) first. Confirm each onload awaits parsePolicyDocument and only clears the parsing flag on the success path.",
+    "In components/Analyzer.tsx wrap the body of reader.onload in try/catch/finally: keep the existing parse + setGuidelines/setCptCode logic in the try, and move setIsParsing(false) into a finally so it runs whether the parse resolves or rejects. Add reader.onerror that also clears the parsing state (setIsParsing(false)).",
+    "In components/Appeals.tsx apply the same pattern to its reader.onload: wrap the body in try/catch/finally, move setParsingDoc(null) into finally, and add reader.onerror that clears the parsing state (setParsingDoc(null)). Preserve the existing DENIAL/CLINICAL/POLICY branching logic.",
+    "Keep changes minimal and mechanical: NO layout/visual/JSX structure changes, NO new dependencies, NO restored browser cloud SDK calls, NO bundled keys, NO raw narrative egress. Do not re-wire geminiService compat functions."
+  ],
+  "acceptance_criteria": [
+    "In both Analyzer.tsx and Appeals.tsx, the reader.onload body is wrapped in try/catch/finally and the parsing flag (isParsing / parsingDoc) is cleared in finally, so a rejected parsePolicyDocument always exits the loading state.",
+    "Both files add a reader.onerror handler that clears the parsing state.",
+    "No layout/visual changes, no restored cloud SDK calls, no bundled keys, no raw narrative egress.",
+    "npm run typecheck passes and npm run build succeeds."
+  ],
+  "verification": [
+    "npm run typecheck",
+    "npm run build",
+    "npm test  (server suite unaffected and still green)"
+  ],
+  "blocked_reason": null,
+  "findings": "Fixed both reader.onload handlers. components/Analyzer.tsx: wrapped the onload body in try/catch/finally with setIsParsing(false) in finally, added reader.onerror that calls setIsParsing(false). components/Appeals.tsx: wrapped the onload body in try/catch/finally with setParsingDoc(null) in finally (preserving DENIAL/CLINICAL/POLICY branching and the existing alert on parse failure), added reader.onerror that calls setParsingDoc(null). A rejected parsePolicyDocument (the 'not wired' compat rejection) now always clears the loading state instead of leaving the UI stuck. Changes are mechanical-only: no JSX/layout/visual changes, no new dependencies, no restored cloud SDK calls, no bundled keys, no re-wiring of geminiService compat functions. Verification from worktree root: 'npm run typecheck' PASS, 'npm run build' PASS (vite build succeeded), 'npm test' PASS (152 passed, 1 skipped, Node v24; server suite unchanged and green)."
+}

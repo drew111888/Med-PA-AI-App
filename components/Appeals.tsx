@@ -71,27 +71,35 @@ const Appeals: React.FC = () => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = async () => {
-        const base64 = (reader.result as string).split(',')[1];
-        const result = await parsePolicyDocument(base64, file.type || 'application/pdf');
-        
-        if (type === 'DENIAL') {
-          setFormData(prev => ({ 
-            ...prev, 
-            denialReason: result.content || '',
-            insuranceProvider: result.carrier || prev.insuranceProvider 
-          }));
-        } else if (type === 'CLINICAL') {
-          setFormData(prev => ({ 
-            ...prev, 
-            clinicalEvidence: result.content || '',
-            cptCode: result.cptCodes?.[0] || prev.cptCode 
-          }));
-        } else if (type === 'POLICY') {
-          setFormData(prev => ({
-             ...prev,
-             clinicalEvidence: `[GUIDELINE REFERENCE: ${result.title} (${result.carrier})]\n${result.content}\n\n${prev.clinicalEvidence}`.trim()
-          }));
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          const result = await parsePolicyDocument(base64, file.type || 'application/pdf');
+
+          if (type === 'DENIAL') {
+            setFormData(prev => ({ 
+              ...prev, 
+              denialReason: result.content || '',
+              insuranceProvider: result.carrier || prev.insuranceProvider 
+            }));
+          } else if (type === 'CLINICAL') {
+            setFormData(prev => ({ 
+              ...prev, 
+              clinicalEvidence: result.content || '',
+              cptCode: result.cptCodes?.[0] || prev.cptCode 
+            }));
+          } else if (type === 'POLICY') {
+            setFormData(prev => ({
+               ...prev,
+               clinicalEvidence: `[GUIDELINE REFERENCE: ${result.title} (${result.carrier})]\n${result.content}\n\n${prev.clinicalEvidence}`.trim()
+            }));
+          }
+        } catch (err) {
+          alert("Failed to parse document. Please ensure it is a valid PDF or text file.");
+        } finally {
+          setParsingDoc(null);
         }
+      };
+      reader.onerror = () => {
         setParsingDoc(null);
       };
     } catch (err) {
