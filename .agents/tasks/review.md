@@ -1,103 +1,128 @@
-# Review — UI Wiring Packages 1 & 2 (READ-ONLY increment)
+# Review — UI Wiring Packages 3 & 4 (`feat/ui-wiring-3-4` @ fd41406)
 
-Reviewer pass on `feat/ui-wiring-1-2` @ `84a12f2`, diffed against base `feat/backend-prereqs`.
-Scope: focused frontend-integration increment (Package 1 server-auth + capabilities +
-centralized typed fetch; Package 2 read-only typed list/detail/summary/jobs rendering).
-No mutation wired.
+Reviewer pass against `.agents/tasks/ui-wiring-3-4-plan.md`, the original user request, and the
+listed discipline requirements. Diff compared against `feat/ui-wiring-1-2` (the Pkg 1&2 base).
 
 ## Verdict: APPROVED — no blocking findings.
 
-## Evidence basis
+## Scope of change (FACT — `git diff --name-status`)
+- M `components/Analyzer.tsx`, `components/Appeals.tsx`, `components/Cases.tsx`,
+  `components/WorkflowRuns.tsx`
+- M `services/apiClient.ts`
+- A `tests/client/apiClientMutations.test.ts`
 
-- Diff: `git diff feat/backend-prereqs` (14 files, +1907/-365). Changed app files:
-  `App.tsx`, `services/apiClient.ts`, `services/sessionContext.tsx`, `services/capabilities.ts`,
-  `services/deadlineView.ts`, `components/SecurityGateway.tsx`, `components/Cases.tsx`,
-  `components/Dashboard.tsx`, `components/WorkflowRuns.tsx`, plus 3 client test files.
-- Server contracts read directly: `server/auth/authRoutes.ts`, `server/routes/caseRoutes.ts`,
-  `server/domain/types.ts`, `server/app.ts` (health). Client types were checked field-by-field
-  against these; server source wins and the client matches it.
-- Recorded verification (`verification.md`): Node v24.21.0; `tsc --noEmit` clean; `vitest run`
-  175 passed / 1 skipped (backend 152/1 preserved + 23 new client tests); `vite build` ok;
-  curl smoke at the API boundary (auth, bearer enforcement, reads, role reads, logout
-  invalidation). Not re-run per instructions; test files spot-read to confirm they assert the
-  required behaviors.
+No `server/**` file changed. No existing test file modified or deleted (the only `.test.ts`
+in the diff is the new additive `tests/client/apiClientMutations.test.ts`). Matches the plan's
+"change set" and the scope guardrail exactly.
 
-## Required-behavior checks
+## Verification evidence (read from commit message `fd41406`, not re-run)
+- `node --version` → v24.21.0.
+- `npm run typecheck` → clean (tsc --noEmit, exit 0).
+- `npm test` → 19 files, 195 passed / 1 skipped (152 backend + 23 prior client + 20 new).
+  Baseline 175/1 not regressed.
+- `npm run build` → vite build OK (pre-existing chunk-size warning only).
+- Runtime smoke (temp DB, scheduler off, port 4100): health allowCloudAi=false; run den_001 →
+  packet_ready; approve BILLER 403 / wrong-version 409 / no-body 400 / correct 200 / duplicate
+  409; submit-before-handoff 409; handoff 200 w/ packetVersion; download 200 attachment +
+  packetVersion; submit missing-field 409 / valid 200; receipt readback 200; poll
+  {processed:3,cases:3}; retry-on-submitted 409.
 
-1. **Login via server; no browser password compare; no embedded creds; no secret logging; no
-   role-picker auth.** PASS. `SecurityGateway.handleLogin` calls `session.login()` →
-   `api.login` → `POST /api/auth/login` (`apiClient.ts` login). No in-browser comparison; no
-   seeded credentials in the wired files; grep found no password/token logging in
-   apiClient/sessionContext/SecurityGateway. BAA checkbox is a UX gate, not authentication.
+Evidence is complete (L2 static + L3 test + L4 build + L5 runtime smoke, per the commit).
+Spot-checks performed this pass to resolve specific doubts: server route mapping and Dashboard
+health status (both confirmed below). Full suites not re-run per instruction.
 
-2. **In-memory token (not localStorage); Bearer on every protected request incl. downloads;
-   `/auth/me` restore; `/auth/logout` clears state.** PASS. Token held in `tokenRef`
-   (`sessionContext.tsx`), injected via `setAuthTokenGetter`; no localStorage/sessionStorage in
-   wired files (only doc comments). `request()` attaches `Authorization: Bearer <token>` unless
-   `anonymous`; `getReceipt` (download/receipt path) is protected and carries the token (asserted
-   by `apiClient.test.ts`). `restore()` calls `api.me()`; `logout()` calls `api.logout()` then
-   clears.
+## Discipline requirements — findings
 
-3. **Capabilities from server role only; canApprove={ADMIN,PROVIDER}; canRun/canViewHandoff/
-   canRecordSubmission=all three; BILLER cannot approve.** PASS. `capabilities.deriveCapabilities`
-   mirrors `ROLE_PERMISSIONS`; `capabilities.test.ts` asserts BILLER cannot approve, all three
-   can run/view/record, null role → no capabilities. Not derived from browser names.
+1. **Approve: {packetVersion} from loaded detail, human-review checkbox gate, disabled while
+   pending, 409 → refresh detail+list+summary + force re-review, no auto-retry.** PASS.
+   `handleApprove` sends `api.approveCase(c.id, c.packetVersion)` (loaded detail). Button
+   `disabled={!acknowledged || approvePending}`; checkbox text names the exact version. On
+   `conflict`: `setAcknowledged(false)` + `onMutated(c.id)` (which runs
+   `getCase`+`listCases`+`summary`) and surfaces the re-review message. No branch re-issues the
+   approve call. `apiClient.approveCase` body is `{packetVersion}` only (test-asserted
+   `Object.keys(body) === ['packetVersion']`, no `actor`).
 
-4. **Single centralized `request()`; 401 ends session + routes to login; 403 keeps session +
-   message; distinct 400/404/409/network+5xx; never error→empty list/zero; no `actor` sent.**
-   PASS. `apiClient.request()` is the sole fetch path; `kindForStatus` maps 401→unauthorized
-   (invokes `onUnauthorized`), 403→forbidden, 400/404/409 distinct, network→serverError status 0,
-   5xx→serverError. Errors return typed `ApiError`, never a collapsed empty collection
-   (asserted). Only `actor` occurrence in the worktree services is the read-only
-   `AuditEntry.actor` display field; no request body sends `actor` (asserted). Stale
-   `approveCase`/`submitCase`/`runPoll`/`listDenials` were removed from this worktree's API
-   surface (surface ends at `getReceipt`).
+2. **Generate handoff: separate control, enabled ONLY when state==='approved', shows generated
+   version, deadline urgency stays visible.** PASS. `disabled={c.state !== 'approved' ||
+   handoffPending}` with an explanatory title otherwise; renders
+   `generatedHandoff.packetVersion`; panel copy states it is NOT submission; the deadline panel
+   is rendered unconditionally above and is not dismissed by handoff generation.
 
-5. **Types match actual server contracts; lifecycle fields separate; job-done not conflated with
-   approved/submitted.** PASS. Client `CaseSummary`, `AppealCase`, `Classification`, `GateResult`,
-   `AppealPacket`, `DeadlineItem`, `SummaryInfo`, `JobRow`, `HealthInfo` match the route/domain
-   source (packet nullable, appealDeadline nullable, daysRemaining nullable). `caseId/denialId/
-   state/packetVersion/approvedVersion/hasHandoff/hasReceipt/handoffVersion/submittedAt` are
-   rendered as separate `Field`s in `CaseReview`. Jobs are shown in a distinct `WorkflowRuns`
-   panel; job status is never mapped onto case approval/submission state.
+3. **Download handoff via fetch → Blob → object URL with bearer header, surfaces errors +
+   packetVersion.** PASS. `downloadHandoff` in `apiClient.ts` is a separate `fetch` helper that
+   attaches `authorization: Bearer <token>` from `tokenGetter` (NOT the JSON `request()` path,
+   NOT a plain `<a href>`), returns the Blob on 2xx, maps non-2xx via `kindForStatus`, fires
+   `onUnauthorized` on 401, and returns `serverError`/status 0 on network throw. The component
+   parses Blob JSON for `packetVersion`, builds an object URL, triggers an `<a download>` click,
+   then `revokeObjectURL`; download errors surface via `ErrorLine`. Tests cover bearer header,
+   200 Blob, 404→notFound, network→serverError, 401→onUnauthorized.
 
-6. **All states rendered; packet===null safe; aiValidationIssues/gate deficits/citations
-   (documentId preserved)/policy+date inputs+deadlineBlockers rendered; review count from
-   packetsReady; unknownDeadlines separate; nullable deadlines null-safe; audit rendered; missing
-   joins explicit; /api/jobs global; Retry not wired; loading/empty/error distinct; health
-   synthetic/cloud-off visible.** PASS. `STATE_BADGE` covers all 13 states with a safe fallback.
-   `CaseReview` guards `!packet` with an explicit held-before-AI message; renders
-   `aiValidationIssues`, gate `checks`/`deficits` with `[documentId] "snippet"`, classification
-   date/window/route/policy and `deadlineBlockers`, and the audit trail. Dashboard review count =
-   `summary.packetsReady`; `unknownDeadlines` rendered in a separate section;
-   `describeDeadline` branches on `deadlineKnown` and never compares null numerically nor emits
-   `nulld` (asserted in `deadlineView.test.ts`); calculated deadlines labelled "calculated from
-   synthetic rule". Patient/carrier/owner joins + tasks shown as explicit "unavailable".
-   `WorkflowRuns` consumes global `GET /api/jobs`; Retry button is `disabled` + "next increment".
-   Every panel has distinct loading/error/empty states. Health badge shows
-   `aiProvider`/`cloud-off` from `allowCloudAi === false`.
+4. **Record submission: separate form, enabled ONLY when state==='handoff_generated', 409
+   authoritative, reads back GET /receipt, labeled HUMAN-ENTERED (not payer confirmation / not
+   submitted-at-handoff).** PASS. Distinct panel; entry form only rendered when
+   `c.state === 'handoff_generated'`; client validation gates the button but `handleRecordSubmission`
+   routes a server `conflict` through `onMutated` and surfaces the message (treated as
+   authoritative). On `ok` it calls `api.getReceipt(c.id)` and renders the stored record (not
+   fabricated from audit). Copy explicitly labels it a human-entered receipt, "NOT payer
+   transmission and NOT independent payer confirmation." Server maps SubmissionError → 409
+   (confirmed in `caseRoutes.ts`), matching the client's 409-as-authoritative handling.
 
-7. **No mutation wired; legacy browser-AI/bundled keys/cloud SDK not restored.** PASS. Approve,
-   Scan-for-Denials, and Retry render `disabled` with "next increment"; handoff/submission are not
-   wired. No mutation methods remain on the client surface. `services/geminiService.ts`,
-   `components/Analyzer.tsx`, `components/Appeals.tsx`, `services/permissionsService.ts` have an
-   empty diff against base (untouched).
+5. **After every mutation: refresh detail+list+summary; no optimistic advance; 409 reconciles.**
+   PASS. `reloadAfterMutation` runs `Promise.all([openCase(id), refresh(), refreshSummary()])`
+   and is passed as `onMutated` to every mutation handler (approve/handoff/submit/retry). No
+   handler mutates local case state before `isOk(res)`. Every `conflict` branch calls `onMutated`.
+   Run controls refresh list+summary via `onRan`.
 
-8. **Existing tests not weakened; backend 152/1 preserved; commit on branch, correct author, not
-   merged.** PASS per recorded evidence (175 passed / 1 skipped total; backend 152/1 intact; only
-   additive client tests). `git branch --contains HEAD` → only `feat/ui-wiring-1-2` (not merged
-   into base/main). Author: `Anthony LaVear, Lead BSA, SDIT Architecture`.
+6. **Revision / 'Request changes' omitted or clearly disabled.** PASS. No revision control exists;
+   a static note states no authenticated packet-edit/version-invalidation API exists and directs
+   the user to correct source data upstream and re-run.
 
-## Notes (non-blocking, not findings)
+7. **Run controls (run/denial, run/poll) show pending then actual returned state, not async; no
+   schedule-editing UI.** PASS. `RunControls` shows pending labels ("Draining…"/"Running…") then
+   renders `{processed,cases}` for poll and `{caseId,state}` for denial — the actual synchronous
+   drain results. Copy explicitly says "runs now … not an accepted background job. No schedule
+   configuration is exposed." No scheduler UI present.
 
-- The main-checkout `services/apiClient.ts` (outside this worktree) still contains stale
-  `{actor}` methods; that is a separate checkout and out of scope for this branch review. The
-  worktree under review is clean.
-- `__test__ = { request }` export is test-only surface; harmless.
-- Rendered UI was not exercised in a browser/E2E runner (none configured); client logic is
-  covered by unit tests and the API boundary by curl. This matches the increment's stated L4 +
-  partial-L5 scope and the read-only no-mutation guardrail.
+8. **Retry enabled for failed/needs_more_data/needs_review with pending/disabled + post-action
+   refresh; no fake evidence/date editor.** PASS. `retryable = state ∈ {failed, needs_more_data,
+   needs_review}`; button `disabled={retryPending}`; on `ok`/`conflict` runs `onMutated`
+   (repaints from fresh `getCase` since the retry body is partial). Copy states there is no
+   evidence/date editor; none was added. `WorkflowRuns` correctly relabels retry as a case action
+   (no job-retry endpoint) rather than wiring a non-existent contract.
 
-## Verification level accepted
-L4 (build) + L2/L3 (typecheck + 23 client unit tests) + partial L5 at the API boundary (curl),
-as recorded. Appropriate for a read-only wiring increment.
+9. **Legacy geminiService.ts shims remain rejecting; disabled 'unavailable — backend replacement
+   pending' controls; FileReader try/finally intact; no browser cloud SDK / bundled key / raw
+   narrative egress restored.** PASS. `services/geminiService.ts` byte-diff = 0 (untouched); all
+   four functions reject via `notWired`; only import is a local `types.ts` (no cloud SDK).
+   Analyzer/Appeals upload + analyze/generate controls are `disabled` with
+   `title="Unavailable — backend replacement pending"`. FileReader `try/finally` + `onerror`
+   cleanup still present (Analyzer lines 86/114/118; Appeals 98/102/139).
+
+10. **Health-derived 'Synthetic / local-stub AI / cloud-off' status visible.** PASS.
+    `Dashboard.tsx` derives `cloudOff = h.allowCloudAi === false` and renders
+    "Synthetic data • local-stub AI (<provider>) • cloud AI OFF". Unchanged this pass (verified,
+    not regressed).
+
+11. **Backend contracts NOT changed; existing tests NOT weakened/deleted; new client tests cover
+    mutation flows; suite not regressed below 175/1.** PASS. No `server/**` change; no existing
+    test touched. New `apiClientMutations.test.ts` (20 tests) covers approve (200/400/409/403),
+    generateHandoff (+409), downloadHandoff (bearer/Blob/404/network/401), recordSubmission
+    (body shape, optional-field omission, missing-field→409 reconciliation), getReceipt readback,
+    retryCase (+409), runDenial (+404), runPoll ({processed,cases}), and a no-`actor` sweep.
+    Commit records 195 passed / 1 skipped (≥ 175/1).
+
+## Server cross-check (spot-check, `server/routes/caseRoutes.ts`)
+Confirmed the client's assumptions: approve → 400 (missing packetVersion) / 409 (state, no AI
+validation, no evidence, stale/dup); retry → 409 for non-retryable / 404 missing / 409 denial
+not discoverable; `POST /handoff` SubmissionError → 409; `GET /handoff` → 404 or package JSON
+with `content-disposition: attachment` (so the Blob→JSON `packetVersion` read is valid);
+`POST /submit` SubmissionError → 409 (matches the 409-authoritative handling). No contract drift.
+
+## Remaining risk / unknowns (non-blocking)
+- Runtime verification is the coder's recorded curl smoke (L5 for the API chain) plus L3 client
+  unit tests; there is no automated browser/E2E test exercising the rendered React mutation
+  panels. The component wiring is verified by inspection + the apiClient unit tests, not by a
+  rendered-DOM test. Not a blocker for this scope (plan explicitly keeps the single node test
+  env, no jsdom), but noted.
+- Athena / real-model / payer transport remain explicitly out of scope and unverified, as
+  intended.
