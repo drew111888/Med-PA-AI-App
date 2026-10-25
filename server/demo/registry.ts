@@ -4,9 +4,63 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import type { AuthUser } from '../auth/userRepository.ts';
 import type { DemoRole } from './types.ts';
+import { encryptField, decryptField, isEncrypted } from '../db/crypto.ts';
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+type RegistryDb = InstanceType<typeof DatabaseSync>;
+const VERIFIER_ID = 'encryption_key_v1';
+const VERIFIER_TEXT = 'medauth-synthetic-demo:registry-key:v1';
+const LEGACY_ERROR = 'Existing demo storage has no key verifier. Use a new empty demo data directory; existing data was not changed.';
+const KEY_ERROR = 'Demo storage key verification failed. Use the key originally configured for this demo store.';
+
+const generationStateExists = (dataDir: string): boolean => {
+  const root = path.join(dataDir, 'sandboxes');
+  if (!fs.existsSync(root)) return false;
+  if (fs.lstatSync(root).isSymbolicLink()) throw new Error('Demo sandbox directory must not be a symlink.');
+  return fs.readdirSync(root).length > 0;
+};
+
+/** Read-only preflight. A legacy nonempty store must never be silently rebound. */
+const inspectKey = (db: RegistryDb, dataDir: string, key: string): 'verified' | 'empty' => {
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>).map(r => r.name);
+  if (tables.includes('demo_meta')) {
+    const row = db.prepare('SELECT value FROM demo_meta WHERE key=?').get(VERIFIER_ID) as { value?: unknown } | undefined;
+    if (row) {
+      try {
+        // decryptField intentionally accepts legacy plaintext elsewhere. A key
+        // binding must require authenticated encrypted form before decrypting.
+        if (typeof row.value !== 'string' || !isEncrypted(row.value) || decryptField(row.value, key) !== VERIFIER_TEXT) throw new Error();
+      } catch { throw new Error(KEY_ERROR); }
+      return 'verified';
+    }
+  }
+  const known = new Set(['demo_sandboxes', 'demo_tokens', 'demo_retries', 'demo_rates', 'demo_meta']);
+  for (const table of tables) {
+    if (!known.has(table)) throw new Error(LEGACY_ERROR);
+    const identifier = '"' + table.replace(/"/g, '""') + '"';
+    if (db.prepare(`SELECT 1 FROM ${identifier} LIMIT 1`).get()) throw new Error(LEGACY_ERROR);
+  }
+  if (generationStateExists(dataDir)) throw new Error(LEGACY_ERROR);
+  return 'empty';
+};
+
+/** Prove startup write/fsync/unlink access once; health never repeats writes. */
+const probeWritable = (directory: string): void => {
+  const probe = path.join(directory, `.demo-write-probe-${crypto.randomUUID()}`);
+  let fd: number | undefined;
+  let created = false;
+  try {
+    fd = fs.openSync(probe, 'wx', 0o600);
+    created = true;
+    fs.writeSync(fd, 'ready');
+    fs.fsyncSync(fd);
+  } catch { throw new Error('Demo storage is not writable. Check the configured demo data directory.'); }
+  finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    if (created) fs.unlinkSync(probe);
+  }
+};
 
 export interface SandboxRecord {
   id: string;
@@ -29,12 +83,34 @@ export interface DemoTokenRecord {
 /** A separate durable index. Raw bearer tokens, internal passwords, and chart data never enter it. */
 export class DemoRegistry {
   private readonly db: InstanceType<typeof DatabaseSync>;
+  private readonly verifierToken: string;
+  private readonly registryPath: string;
 
-  constructor(readonly dataDir: string) {
+  constructor(readonly dataDir: string, encryptionKey: string) {
+    if (!encryptionKey?.trim()) throw new Error('A stable demo encryption key must be supplied.');
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     if (fs.lstatSync(dataDir).isSymbolicLink()) throw new Error('Demo data directory must not be a symlink.');
-    this.db = new DatabaseSync(path.join(dataDir, 'registry.sqlite'));
-    this.db.exec(`
+    this.registryPath = path.join(dataDir, 'registry.sqlite');
+    if (fs.existsSync(this.registryPath) && fs.lstatSync(this.registryPath).isSymbolicLink()) throw new Error('Demo registry must not be a symlink.');
+    if (fs.existsSync(this.registryPath) && fs.statSync(this.registryPath).size > 0) {
+      const readOnly = new DatabaseSync(this.registryPath, { readOnly: true });
+      try { inspectKey(readOnly, dataDir, encryptionKey); }
+      finally { readOnly.close(); }
+    } else if (generationStateExists(dataDir)) {
+      throw new Error(LEGACY_ERROR);
+    }
+    // Do not probe or change schema until a pre-existing key binding is valid
+    // (or the store is proven empty).
+    probeWritable(dataDir);
+    const sandboxRoot = path.join(dataDir, 'sandboxes');
+    fs.mkdirSync(sandboxRoot, { recursive: true, mode: 0o700 });
+    if (fs.lstatSync(sandboxRoot).isSymbolicLink()) throw new Error('Demo sandbox directory must not be a symlink.');
+    probeWritable(sandboxRoot);
+    if (fs.existsSync(this.registryPath)) fs.accessSync(this.registryPath, fs.constants.R_OK | fs.constants.W_OK);
+    this.db = new DatabaseSync(this.registryPath);
+    try {
+      const binding = inspectKey(this.db, dataDir, encryptionKey);
+      this.db.exec(`
       PRAGMA journal_mode=WAL;
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS demo_sandboxes (
@@ -53,7 +129,30 @@ export class DemoRegistry {
       CREATE TABLE IF NOT EXISTS demo_rates (
         rate_key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, resets_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS demo_meta (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL
+      );
     `);
+      if (binding === 'empty') {
+        this.db.prepare('INSERT INTO demo_meta(key,value) VALUES(?,?)').run(VERIFIER_ID, encryptField(VERIFIER_TEXT, encryptionKey));
+      }
+      this.verifierToken = (this.db.prepare('SELECT value FROM demo_meta WHERE key=?').get(VERIFIER_ID) as { value: string }).value;
+    } catch (err) {
+      this.db.close();
+      throw err;
+    }
+  }
+
+  /** Read-only readiness: no timestamp, rate-counter, or file writes. */
+  isReady(): boolean {
+    try {
+      fs.accessSync(this.dataDir, fs.constants.R_OK | fs.constants.W_OK);
+      fs.accessSync(path.join(this.dataDir, 'sandboxes'), fs.constants.R_OK | fs.constants.W_OK);
+      fs.accessSync(this.registryPath, fs.constants.R_OK | fs.constants.W_OK);
+      const row = this.db.prepare('SELECT value FROM demo_meta WHERE key=?').get(VERIFIER_ID) as { value?: unknown } | undefined;
+      this.db.prepare('SELECT 1 FROM demo_sandboxes LIMIT 1').get();
+      return row?.value === this.verifierToken;
+    } catch { return false; }
   }
 
   create(id: string, generation: string, now: number, ttlMs: number): SandboxRecord {

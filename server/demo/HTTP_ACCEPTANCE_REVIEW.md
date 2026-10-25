@@ -1,6 +1,6 @@
 # Synthetic demo HTTP acceptance review
 
-Scope: the hosted demo gateway in this isolated project. This review does not authorize real patient data, live EHR/model connections, payer transmission, or publication of credentials.
+Scope: the hosted demo gateway in this isolated project. This review does not authorize real patient data, live EHR/model connections, payer transmission, or publication of credentials. Final local configuration/readiness guards pass as recorded in `../../CONTAINER_CHECKS.md`; hosted image/runtime acceptance remains pending.
 
 ## Acceptance coverage
 
@@ -13,9 +13,9 @@ Scope: the hosted demo gateway in this isolated project. This review does not au
 - Sandbox capacity, bootstrap rate, storage allocation, mutation/poll/retry budgets, absolute and idle expiry using an injected clock, reset quotas, and persistent registry reopen behavior.
 - Malformed/oversized bodies and sanitized errors without internal paths, secrets, or stack traces.
 
-There are 21 HTTP acceptance tests. The parent task executed the final suite with Node 24 and the permitted loopback preload: **23 test files, 228 tests passed, one live-Athena test skipped**, in 3.17 seconds. All 21 demo HTTP acceptance tests passed; repeated expiry/cleanup cycles completed in 870 ms. The demo build and diff check also passed. No live Athena connection was exercised.
+There are 21 HTTP acceptance tests. For the historical `b68258a` baseline, the parent task executed the suite with Node 24 and the permitted loopback preload: **23 test files, 228 tests passed, one live-Athena test skipped**, in 3.17 seconds. All 21 demo HTTP acceptance tests passed at that baseline; repeated expiry/cleanup cycles completed in 870 ms. The baseline demo build and diff check also passed. No live Athena connection was exercised. A subsequent authorized final run passed **25 files, 246 tests, one live-Athena test skipped**, including all 15 key/readiness and three entry tests, plus typecheck and demo build.
 
-This review agent authored the tests and reviewed the source; runtime execution was performed by the parent task. Final browser/deployment verification and the last typecheck are outside this report's recorded execution evidence.
+This review agent authored the HTTP tests and reviewed the source; historical runtime execution was performed by the parent task. An earlier key/readiness test attempt was rejected and did not execute. After the owner explicitly approved loopback-only testing with disposable synthetic data, the exact target was retried once and passed, followed by the full final suite. Hosted deployment verification remains pending.
 
 ## Source review conclusions
 

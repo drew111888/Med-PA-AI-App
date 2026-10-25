@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createApp, type AppContext } from '../app.ts';
 import { openDb } from '../db/index.ts';
 import type { AppConfig } from '../config.ts';
@@ -38,6 +39,29 @@ const caseWrite = new RegExp(`^/api/cases/(${CASE_ID})/(approve|retry|handoff|su
 const standardReads = new Set(['/api/auth/me', '/api/cases', '/api/summary', '/api/jobs']);
 const standardWrites = new Set(['/api/auth/logout', '/api/run/poll', '/api/run/denial/den_001', '/api/run/denial/den_002', '/api/run/denial/den_003']);
 const demoPaths = new Set(['/api/demo/start', '/api/demo/role', '/api/demo/reset', '/api/demo/session', '/api/demo/intake']);
+const containsPath = (parent: string, child: string): boolean => {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep));
+};
+const pathsOverlap = (a: string, b: string): boolean => containsPath(a, b) || containsPath(b, a);
+const inspectPublicTree = (root: string): void => {
+  let entries = 0;
+  const visit = (directory: string, depth: number): void => {
+    if (depth > 16) throw new Error('Demo client asset tree exceeds the supported depth.');
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (++entries > 10_000) throw new Error('Demo client asset tree exceeds the supported entry count.');
+      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
+        throw new Error('Demo public assets must contain only regular files and directories; symlinks and special files are forbidden.');
+      }
+      const target = path.join(directory, entry.name);
+      fs.accessSync(target, fs.constants.R_OK | (entry.isDirectory() ? fs.constants.X_OK : 0));
+      if (entry.isDirectory()) visit(target, depth + 1);
+    }
+  };
+  // Read metadata inside the explicitly supplied asset directory only. Never
+  // follow a descendant symlink into a private store or another directory.
+  visit(root, 0);
+};
 
 /**
  * A deliberately narrow gateway around the unchanged core application.
@@ -52,15 +76,46 @@ export const createDemoApp = (options: DemoOptions): DemoRuntime => {
   if (fs.lstatSync(options.dataDir).isSymbolicLink()) throw new Error('Demo dataDir must not be a symlink.');
   const dataDir = fs.realpathSync(options.dataDir);
   if (dataDir === path.parse(dataDir).root) throw new Error('Demo dataDir must not be a filesystem root.');
+  let clientDir: string | undefined;
+  if (options.clientDistPath !== undefined) {
+    try {
+      clientDir = fs.realpathSync(path.resolve(options.clientDistPath));
+      if (!fs.statSync(clientDir).isDirectory()) throw new Error();
+      fs.accessSync(clientDir, fs.constants.R_OK | fs.constants.X_OK);
+    } catch { throw new Error('Demo client assets must be an existing readable directory with index.html.'); }
+    const sourceRoot = fs.realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+    if (containsPath(clientDir, sourceRoot)) throw new Error('Demo client assets must not expose the project source directory.');
+    if (pathsOverlap(clientDir, dataDir)) {
+      throw new Error('Demo public assets and private data must be separate directories.');
+    }
+    let indexReal: string;
+    try {
+      const index = path.join(clientDir, 'index.html');
+      indexReal = fs.realpathSync(index);
+      if (!fs.statSync(indexReal).isFile()) throw new Error();
+      fs.accessSync(indexReal, fs.constants.R_OK);
+    } catch { throw new Error('Demo client assets must be an existing readable directory with index.html.'); }
+    if (pathsOverlap(indexReal, dataDir)) throw new Error('Demo public assets and private data must be separate directories.');
+    inspectPublicTree(clientDir);
+  }
+  const clientReady = (): boolean => {
+    if (!clientDir) return true; // Intentional API-only factory use in tests.
+    try {
+      if (fs.realpathSync(clientDir) !== clientDir) return false;
+      const index = path.join(clientDir, 'index.html');
+      if (!fs.statSync(index).isFile() || pathsOverlap(fs.realpathSync(index), dataDir)) return false;
+      fs.accessSync(clientDir, fs.constants.R_OK | fs.constants.X_OK);
+      fs.accessSync(index, fs.constants.R_OK);
+      return true;
+    } catch { return false; }
+  };
   const sandboxRoot = path.join(dataDir, 'sandboxes');
-  fs.mkdirSync(sandboxRoot, { recursive: true, mode: 0o700 });
-  if (fs.lstatSync(sandboxRoot).isSymbolicLink()) throw new Error('Demo sandbox directory must not be a symlink.');
   const now = options.now ?? Date.now;
   const limits: DemoLimits = { ...DEFAULT_DEMO_LIMITS, ...options.limits };
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid demo limit: ${name}`);
   }
-  const registry = new DemoRegistry(dataDir);
+  const registry = new DemoRegistry(dataDir, options.encryptionKey);
   const contexts = new Map<string, LiveSandbox>();
   let globalMutation = false;
   let closing = false;
@@ -320,7 +375,12 @@ export const createDemoApp = (options: DemoOptions): DemoRuntime => {
   const asyncRoute = (fn: (req: Request, res: Response) => Promise<void> | void) =>
     (req: Request, res: Response) => { void Promise.resolve().then(() => fn(req, res)).catch(err => sendError(res, err)); };
 
-  app.get('/api/health', (_req, res) => res.json({ status: 'ok', mode: 'synthetic-demo', ehrAdapter: 'synthetic', aiProvider: 'local-stub', allowCloudAi: false }));
+  app.get('/api/health', (_req, res) => {
+    const registryReady = registry.isReady();
+    const assetsReady = clientReady();
+    const ready = registryReady && assetsReady;
+    res.status(ready ? 200 : 503).json({ status: ready ? 'ok' : 'degraded', registry: registryReady ? 'ready' : 'unavailable', assets: clientDir ? (assetsReady ? 'ready' : 'unavailable') : 'not-configured', mode: 'synthetic-demo', ehrAdapter: 'synthetic', aiProvider: 'local-stub', allowCloudAi: false });
+  });
 
   app.post('/api/demo/start', asyncRoute(async (req, res) => {
     const role = roleOf(exactBody(req, ['role']).role);
@@ -480,8 +540,8 @@ export const createDemoApp = (options: DemoOptions): DemoRuntime => {
 
   // Serve only non-API assets here; API requests continue into the explicit
   // gateway below. This also prevents an SPA fallback from swallowing an API.
-  if (options.clientDistPath) {
-    const client = path.resolve(options.clientDistPath);
+  if (clientDir) {
+    const client = clientDir;
     const assets = express.static(client);
     app.use((req, res, next) => {
       if (req.path.startsWith('/api/')) return next();

@@ -1,4 +1,4 @@
-# Proposed resources only. Do not sync until paid-resource AND secret approval.
+# Owner approved this single service, disk and native generated key. Validate before applying.
 # Select Provider Platform (tea-dakk93942hec73asmhkg) explicitly in Render.
 previews:
   generation: "off"

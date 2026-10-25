@@ -5,7 +5,7 @@ Base: `378141dcc5d5b7b41b67e99c79b4b7854ff7af82`. Release branch: `codex/hosted-
 ## Automated evidence
 
 - Node 24.21.0, using the already installed dependency tree; no package installation.
-- Full Vitest suite: **23 files passed; 228 tests passed, one live-Athena test skipped**, duration 3.17 s.
+- Full Vitest suite: **25 files passed; 246 tests passed, one live-Athena test skipped**, duration 3.45 s. Includes the final startup, key-verification and public-root guards.
 - Includes **21 actual HTTP demo acceptance tests** against disposable databases and **55 client tests**. HTTP listeners were confined to loopback using a QA-only preload; application source was not altered for that constraint.
 - TypeScript `tsc --noEmit`: pass.
 - `npm run build:demo`: pass. Vite's large-chunk advisory remains; no build error.
@@ -46,6 +46,6 @@ The core retry/intake implementation was not changed. Fixed PDF/unknown-date ret
 
 The existing Tailwind CDN runtime remains; its pinned download returned HTTP 403 and was not bypassed. Google Fonts/remote ESM references were removed. This release is not fully offline.
 
-`Dockerfile.demo` is prepared but was not image-built, because no dependency installation/image pull was authorized for local verification. Render CLI is unavailable and Python's JSON-schema validator is absent; `render.demo.yaml` was reviewed against the current official specification/schema, but no Render platform validation or sync was performed. The official schema was fetched read-only. Apply native validation before an approved resource creation.
+`Dockerfile.demo` is prepared but was not image-built, because the installed Docker CLI has no running daemon: its desktop-linux socket is missing. No Docker installation, daemon startup or local image pull/build was attempted. Render CLI is unavailable and Python's JSON-schema validator is absent; `render.demo.yaml` was reviewed against the current official specification/schema, but no Render platform validation or sync was performed. The official schema was fetched read-only. Apply native validation before an approved resource creation.
 
-No paid service/disk, remote database, host secret or backend deployment was created. See `DEMO_RELEASE.md` for the exact resource/billing/secret approval package. Branch push does not constitute deployment or merge to main.
+The owner approved the specified paid service/disk and native generated encryption key; no paid service/disk, host secret or backend deployment had been created at this local acceptance checkpoint. See `DEMO_RELEASE.md` for the resource/billing/secret package and `CONTAINER_CHECKS.md` for remaining live checks. Branch push does not constitute deployment or merge to main.
