@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openTestDb } from './db/index.ts';
 import { createApp } from './app.ts';
 import { loadConfig, resetConfigCache } from './config.ts';
+import { hashToken } from './auth/password.ts';
 
 const testApp = () => {
   resetConfigCache();
@@ -239,6 +240,99 @@ describe('handoff vs submission are distinct steps', () => {
         body: { channel: 'fax', confirmationNumber: 'CONF-9' },
       });
       expect(good.body.state).toBe('submitted');
+    });
+  });
+});
+
+describe('GET /api/cases/:id/receipt + hasReceipt + stale handoff (FEAT-004)', () => {
+  it('returns the decrypted receipt fields after a submission is recorded', async () => {
+    const { app } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      await req(base, 'POST', '/api/run/denial/den_001', { token, body: {} });
+
+      const detail = await req(base, 'GET', '/api/cases/case_den_001', { token });
+      const v = detail.body.case.packetVersion;
+      expect(detail.body.case.hasReceipt).toBe(false);
+
+      await req(base, 'POST', '/api/cases/case_den_001/approve', { token, body: { packetVersion: v } });
+      await req(base, 'POST', '/api/cases/case_den_001/handoff', { token, body: {} });
+      const submit = await req(base, 'POST', '/api/cases/case_den_001/submit', {
+        token,
+        body: { channel: 'fax', confirmationNumber: 'CONF-9', submittedAt: '2026-05-01T12:00:00.000Z', note: 'sent' },
+      });
+      expect(submit.body.state).toBe('submitted');
+
+      const receipt = await req(base, 'GET', '/api/cases/case_den_001/receipt', { token });
+      expect(receipt.status).toBe(200);
+      expect(receipt.body.channel).toBe('fax');
+      expect(receipt.body.confirmationNumber).toBe('CONF-9');
+      expect(receipt.body.submittedAt).toBe('2026-05-01T12:00:00.000Z');
+      expect(receipt.body.note).toBe('sent');
+      expect(receipt.body.recordedBy).toMatch(/^usr_/);
+
+      // The case detail now exposes hasReceipt true.
+      const after = await req(base, 'GET', '/api/cases/case_den_001', { token });
+      expect(after.body.case.hasReceipt).toBe(true);
+    });
+  });
+
+  it('returns 404 when no receipt exists', async () => {
+    const { app } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      await req(base, 'POST', '/api/run/denial/den_001', { token, body: {} });
+      const r = await req(base, 'GET', '/api/cases/case_den_001/receipt', { token });
+      expect(r.status).toBe(404);
+      expect(r.body.error).toMatch(/no submission receipt/i);
+    });
+  });
+
+  it('requires authentication (401) and the view_cases permission (403)', async () => {
+    const { app, ctx } = testApp();
+    await withServer(app, async (base) => {
+      // 401 without a token.
+      const noAuth = await req(base, 'GET', '/api/cases/case_den_001/receipt');
+      expect(noAuth.status).toBe(401);
+
+      // 403 for a user whose role lacks view_cases. No seeded role lacks it, so
+      // insert a user with a role outside ROLE_PERMISSIONS to drive the guard.
+      ctx.db
+        .prepare('INSERT INTO users (id, username, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('usr_norole', 'norole', 'No Perms', 'GUEST', 'x', new Date().toISOString());
+      ctx.db
+        .prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run(hashToken('norole-token'), 'usr_norole', new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString());
+
+      const forbidden = await req(base, 'GET', '/api/cases/case_den_001/receipt', { token: 'norole-token' });
+      expect(forbidden.status).toBe(403);
+    });
+  });
+
+  it('rejects a stale handoff (packet changed after handoff) with 409', async () => {
+    const { app, ctx } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      await req(base, 'POST', '/api/run/denial/den_001', { token, body: {} });
+
+      const detail = await req(base, 'GET', '/api/cases/case_den_001', { token });
+      const v = detail.body.case.packetVersion;
+      await req(base, 'POST', '/api/cases/case_den_001/approve', { token, body: { packetVersion: v } });
+      await req(base, 'POST', '/api/cases/case_den_001/handoff', { token, body: {} });
+
+      // Mutate the packet after the handoff was generated -> packet version bumps,
+      // handoff_version no longer matches the current packet version.
+      const c = ctx.services.cases.getCase('case_den_001')!;
+      ctx.services.cases.updateCase('case_den_001', {
+        packet: { ...c.packet!, draftLetter: `${c.packet!.draftLetter} (edited)` },
+      });
+
+      const stale = await req(base, 'POST', '/api/cases/case_den_001/submit', {
+        token,
+        body: { channel: 'fax', confirmationNumber: 'CONF-STALE' },
+      });
+      expect(stale.status).toBe(409);
+      expect(stale.body.error).toMatch(/stale/i);
     });
   });
 });

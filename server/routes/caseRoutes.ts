@@ -212,6 +212,27 @@ export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRe
     }
   });
 
+  // Read a recorded submission receipt (decrypted fields), or 404 if none.
+  router.get('/cases/:id/receipt', requirePermission('view_cases'), (req, res) => {
+    const receipt = cases.getSubmissionReceipt(req.params.id) as
+      | {
+          channel: string;
+          confirmationNumber: string;
+          submittedAt: string;
+          note: string | null;
+          recordedBy: string;
+        }
+      | null;
+    if (!receipt) return res.status(404).json({ error: 'no submission receipt for this case' });
+    res.json({
+      channel: receipt.channel,
+      confirmationNumber: receipt.confirmationNumber,
+      submittedAt: receipt.submittedAt,
+      note: receipt.note,
+      recordedBy: receipt.recordedBy,
+    });
+  });
+
   // --- Summary + deadlines (view_cases) ---
 
   router.get('/summary', requirePermission('view_cases'), (_req, res) => {

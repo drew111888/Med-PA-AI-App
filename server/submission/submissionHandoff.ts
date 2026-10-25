@@ -101,6 +101,13 @@ export const recordSubmission = (
       `submission receipt requires a generated handoff; state is ${c.state}`,
     );
   }
+  // Freshness: the packet must not have changed since the handoff was generated.
+  // A stale handoff (handoff_version != current packet_version) cannot be submitted.
+  if (c.handoffVersion !== c.packetVersion) {
+    throw new SubmissionError(
+      `handoff is stale (generated from v${c.handoffVersion}, current packet is v${c.packetVersion}); regenerate the handoff first`,
+    );
+  }
   if (!receipt?.channel || !receipt?.confirmationNumber) {
     throw new SubmissionError('submission receipt requires channel and confirmationNumber');
   }

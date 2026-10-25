@@ -35,6 +35,8 @@ export interface AppealCaseRow {
   handoffGeneratedAt: string | null;
   /** True when a handoff artifact exists (content fetched separately). */
   hasHandoff: boolean;
+  /** True when a submission receipt exists (content fetched separately). */
+  hasReceipt: boolean;
   submittedBy: string | null;
   submittedAt: string | null;
   createdAt: string;
@@ -315,6 +317,7 @@ export class CaseRepository {
       handoffVersion: row.handoff_version ?? null,
       handoffGeneratedAt: row.handoff_generated_at ?? null,
       hasHandoff: Boolean(row.handoff_enc),
+      hasReceipt: Boolean(row.submission_receipt_enc),
       submittedBy: row.submitted_by ?? null,
       submittedAt: row.submitted_at ?? null,
       createdAt: row.created_at,

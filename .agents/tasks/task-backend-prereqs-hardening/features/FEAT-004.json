@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Defect D: the submission receipt is stored encrypted but there is no read endpoint. Add GET /api/cases/:id/receipt (view_cases) returning decrypted receipt fields or 404; surface a hasReceipt flag on the case detail so the UI knows a receipt exists; and add a handoff/packet freshness check so a stale handoff is rejected with 409. Do NOT invent a receipt from audit text and do NOT add packet edit/revision/version-history endpoints. Depends on FEAT-001; independent of B/C/E.",
+  "status": "completed",
+  "steps": [
+    "Read server/routes/caseRoutes.ts, server/repositories/caseRepository.ts (getSubmissionReceipt, mapCaseRow, hasHandoff), server/submission/submissionHandoff.ts (existing approval-staleness check), and server/app.test.ts harness first.",
+    "In server/routes/caseRoutes.ts add GET /api/cases/:id/receipt guarded by requirePermission('view_cases'): call cases.getSubmissionReceipt(id); if null return 404 { error: 'no submission receipt for this case' }; else return the decrypted fields channel, confirmationNumber, submittedAt, note, recordedBy. The route already sits behind requireAuth(users) via router.use.",
+    "In server/repositories/caseRepository.ts surface a hasReceipt boolean on AppealCaseRow / mapCaseRow derived from Boolean(row.submission_receipt_enc), mirroring the existing hasHandoff flag, so GET /api/cases/:id exposes it.",
+    "In server/submission/submissionHandoff.ts add a packet-version freshness check: generateHandoff already checks approvedVersion===packetVersion; also ensure recordSubmission rejects (SubmissionError -> 409) when the handoff_version no longer matches the current packetVersion (i.e. the packet changed after the handoff was generated) so a stale handoff cannot be submitted. Compare handoff/current packet versions and reject on mismatch.",
+    "Add app tests in server/app.test.ts: run den_001 to packet_ready, approve, generate handoff, record a submission, then GET /api/cases/:id/receipt and assert channel/confirmationNumber/submittedAt/note/recordedBy; assert 404 when no receipt exists; assert 401 without a token and 403 for a role lacking view_cases; and a stale-handoff case where the packet is changed after handoff generation causes the submit (or handoff) to return 409."
+  ],
+  "acceptance_criteria": [
+    "GET /api/cases/:id/receipt returns the decrypted receipt fields (channel, confirmationNumber, submittedAt, note, recordedBy) after a submission is recorded.",
+    "GET /api/cases/:id/receipt returns 404 when no receipt exists.",
+    "The endpoint requires authentication (401 without token) and the view_cases permission (403 otherwise).",
+    "The case detail response exposes a hasReceipt boolean.",
+    "A stale handoff (packet changed after handoff generation) is rejected with 409; no receipt is fabricated from audit text and no packet edit/version-history endpoints are added."
+  ],
+  "verification": [
+    "npx vitest run server/app server/repositories",
+    "npm run typecheck",
+    "npm test"
+  ],
+  "blocked_reason": null,
+  "findings": "Implemented in 3 files (no new migrations, no behavior change to existing routes). (1) server/routes/caseRoutes.ts: added GET /api/cases/:id/receipt behind requirePermission('view_cases') (router.use(requireAuth) already applies); calls cases.getSubmissionReceipt(id); 404 {error:'no submission receipt for this case'} when null, else returns decrypted {channel, confirmationNumber, submittedAt, note, recordedBy}. Placed just above the summary routes. (2) server/repositories/caseRepository.ts: added hasReceipt:boolean to AppealCaseRow and mapCaseRow (Boolean(row.submission_receipt_enc)), mirroring hasHandoff; GET /api/cases/:id exposes it via the full case row. (3) server/submission/submissionHandoff.ts: recordSubmission now rejects a stale handoff via SubmissionError (mapped to 409 in caseRoutes) when c.handoffVersion !== c.packetVersion, i.e. the packet was edited after the handoff was generated (packet edit bumps packetVersion via hashPacket but leaves handoffVersion unchanged). generateHandoff's existing approvedVersion===packetVersion staleness check is unchanged. No receipt is fabricated from audit text; no packet edit/version-history endpoints added. RBAC note: all three seeded roles (ADMIN/PROVIDER/BILLER) grant view_cases, so the 403 regression test inserts a test-only user with an out-of-map role ('GUEST') + session directly via ctx.db to exercise requirePermission('view_cases'); production roles/permissions were NOT changed. Tests added to server/app.test.ts (describe 'GET /api/cases/:id/receipt + hasReceipt + stale handoff (FEAT-004)'): receipt fields after submit + hasReceipt flips false->true; 404 no receipt; 401 no token + 403 no-view_cases; stale-handoff submit -> 409. Verification on Node v24.21.0: 'npx vitest run server/app server/repositories' 38 passed; 'npm run typecheck' clean; 'npm test' 152 passed / 1 skipped / 0 failed (baseline 133+1 skipped; delta is FEAT-001/002/003 already on branch plus the 4 new FEAT-004 app tests). No existing tests weakened or deleted."
+}
