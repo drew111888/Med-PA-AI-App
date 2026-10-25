@@ -66,6 +66,23 @@ export const loadConfig = (overrides: Partial<AppConfig> = {}): AppConfig => {
 
   const isTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
 
+  // Synthetic-only guard: a non-synthetic/production signal with no operator-
+  // supplied encryption key must refuse to boot with the predictable dev key.
+  // Permissive under explicit local synthetic dev (no production signal); the
+  // existing test harness uses loadConfig({isTest:true}) with no production
+  // signal, so it stays permissive. A production signal, however, is never
+  // exempted by test-ness — otherwise the guard would be meaningless.
+  const productionSignal =
+    process.env.NODE_ENV === 'production' || process.env.MEDAUTH_PROFILE === 'production';
+  const hasEncryptionKey = Boolean(process.env.MEDAUTH_DB_ENCRYPTION_KEY);
+  if (productionSignal && !hasEncryptionKey) {
+    throw new Error(
+      'Refusing to boot: a production signal (NODE_ENV=production or MEDAUTH_PROFILE=production) ' +
+        'was set but MEDAUTH_DB_ENCRYPTION_KEY is not provided. The predictable dev key is ' +
+        'synthetic-only. Supply an operator-provided encryption key before running non-synthetic.',
+    );
+  }
+
   const defaultDbPath = isTest
     ? ':memory:'
     : path.resolve(process.cwd(), 'data', 'medauth.db');

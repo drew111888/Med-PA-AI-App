@@ -308,6 +308,95 @@ describe('POST /api/cases/:id/retry (FEAT-002)', () => {
   });
 });
 
+describe('GET /api/summary keeps failed-but-unsubmitted cases on the deadline radar (FEAT-003)', () => {
+  it('a failed case with a known near deadline is urgent; with an unknown deadline is unknown', async () => {
+    const { app, ctx } = testApp();
+    await withServer(app, async (base) => {
+      const token = await loginAs(base, PROVIDER.u, PROVIDER.p);
+      const cases = ctx.services.cases;
+
+      // Minimal rows so appeal_case FKs resolve.
+      cases.upsertPatient({ id: 'pat_f', mrn: 'm', name: 'Failed Case Patient' });
+      cases.upsertClaim({
+        id: 'clm_f',
+        patientId: 'pat_f',
+        carrier: 'Anthem',
+        cptCodes: ['72148'],
+        dateOfService: '2026-09-10',
+      });
+
+      // Known near deadline: 7 days from now.
+      const near = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+      cases.insertDenial({
+        id: 'den_fail_known',
+        claimId: 'clm_f',
+        source: 'api',
+        carrier: 'Anthem',
+        carcCodes: ['50'],
+        rarcCodes: ['N115'],
+        denialDate: '2026-09-15',
+        externalRef: 'FAIL-KNOWN',
+      });
+      cases.createCase('case_fail_known', 'den_fail_known', 'intake');
+      cases.updateCase('case_fail_known', {
+        state: 'failed',
+        classification: {
+          category: 'medical_necessity',
+          appealable: true,
+          rationale: 'synthetic',
+          recognizedCodes: ['50'],
+          unrecognizedCodes: [],
+          appealDeadline: near,
+          deadlineStatus: 'calculated',
+          appealWindowDays: 60,
+          denialDate: '2026-09-15',
+          deadlineBlockers: [],
+          appealRoute: 'route',
+          policyId: 'pol_001',
+        },
+      });
+
+      // Unknown deadline: missing denial date.
+      cases.insertDenial({
+        id: 'den_fail_unknown',
+        claimId: 'clm_f',
+        source: 'api',
+        carrier: 'Anthem',
+        carcCodes: ['50'],
+        rarcCodes: ['N115'],
+        denialDate: null,
+        externalRef: 'FAIL-UNKNOWN',
+      });
+      cases.createCase('case_fail_unknown', 'den_fail_unknown', 'intake');
+      cases.updateCase('case_fail_unknown', {
+        state: 'failed',
+        classification: {
+          category: 'medical_necessity',
+          appealable: true,
+          rationale: 'synthetic',
+          recognizedCodes: ['50'],
+          unrecognizedCodes: [],
+          appealDeadline: null,
+          deadlineStatus: 'unknown_missing_date',
+          appealWindowDays: 60,
+          denialDate: null,
+          deadlineBlockers: ['denial date'],
+          appealRoute: 'route',
+          policyId: 'pol_001',
+        },
+      });
+
+      const summary = await req(base, 'GET', '/api/summary', { token });
+      expect(summary.status).toBe(200);
+
+      const urgentIds = summary.body.urgentDeadlines.map((d: any) => d.caseId);
+      const unknownIds = summary.body.unknownDeadlines.map((d: any) => d.caseId);
+      expect(urgentIds).toContain('case_fail_known');
+      expect(unknownIds).toContain('case_fail_unknown');
+    });
+  });
+});
+
 describe('PDF intake with a missing date surfaces UNKNOWN deadline (never fabricated)', () => {
   it('produces needs_review (incomplete) with deadlineStatus unknown_missing_date', async () => {
     const { app } = testApp();

@@ -206,7 +206,7 @@ export class CaseRepository {
       .run(
         state,
         classification ? JSON.stringify(classification) : null,
-        gate ? JSON.stringify(gate) : null,
+        gate ? encryptField(JSON.stringify(gate), this.encKey) : null,
         packet ? encryptField(JSON.stringify(packet), this.encKey) : null,
         packetVersion,
         packetHash,
@@ -305,7 +305,7 @@ export class CaseRepository {
       denialId: row.denial_id,
       state: row.state,
       classification: row.classification ? JSON.parse(row.classification) : null,
-      gate: row.gate_decision ? JSON.parse(row.gate_decision) : null,
+      gate: row.gate_decision ? JSON.parse(decryptField(row.gate_decision, this.encKey)) : null,
       packet: row.packet ? JSON.parse(decryptField(row.packet, this.encKey)) : null,
       packetVersion: Number(row.packet_version ?? 0),
       packetHash: row.packet_hash ?? null,

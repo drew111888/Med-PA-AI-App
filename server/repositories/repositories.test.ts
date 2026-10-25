@@ -148,12 +148,21 @@ describe('packet builder + persistence', () => {
     repo.updateCase('case_1', { state: 'packet_ready', classification, gate, packet });
 
     // raw packet column is encrypted — no packet field is readable in plaintext
-    const raw = db.prepare('SELECT packet FROM appeal_cases WHERE id=?').get('case_1') as any;
+    const raw = db.prepare('SELECT packet, gate_decision FROM appeal_cases WHERE id=?').get('case_1') as any;
     expect(raw.packet.startsWith('enc:v1:')).toBe(true);
     expect(raw.packet).not.toContain('2026-11-30');
     expect(raw.packet).not.toContain('anthem_medical_necessity_level1');
 
+    // raw gate_decision column is encrypted — no citation snippet leaks in plaintext
+    expect(raw.gate_decision.startsWith('enc:v1:')).toBe(true);
+    const firstSnippet = gate.satisfied[0]?.citations[0]?.snippet;
+    expect(firstSnippet).toBeTruthy();
+    expect(raw.gate_decision).not.toContain(firstSnippet);
+
     const reloaded = repo.getCase('case_1');
+    // decrypted gate round-trips to the same deterministic decision
+    expect(reloaded?.gate?.decision).toBe(gate.decision);
+    expect(reloaded?.gate?.satisfied.length).toBe(gate.satisfied.length);
     expect(reloaded?.packet?.evidence.length).toBeGreaterThan(0);
     expect(reloaded?.packet?.appealDeadline).toBe('2026-11-30');
     expect(reloaded?.packet?.aiValidationPassed).toBe(true);

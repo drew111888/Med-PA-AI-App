@@ -18,6 +18,20 @@ export interface SeedUser {
 export const seedUsersIfEmpty = (users: UserRepository): SeedUser[] => {
   if (users.countUsers() > 0) return [];
 
+  // Synthetic-only guard: refuse to seed demo users under a non-synthetic/
+  // production signal with no operator-supplied encryption key (mirrors
+  // loadConfig's guard). Permissive under explicit local synthetic dev (no
+  // production signal). A production signal is never exempted by test-ness.
+  const productionSignal =
+    process.env.NODE_ENV === 'production' || process.env.MEDAUTH_PROFILE === 'production';
+  const hasEncryptionKey = Boolean(process.env.MEDAUTH_DB_ENCRYPTION_KEY);
+  if (productionSignal && !hasEncryptionKey) {
+    throw new Error(
+      'Refusing to seed synthetic demo users: a production signal was set without ' +
+        'MEDAUTH_DB_ENCRYPTION_KEY. Create users through an operator flow for non-synthetic runs.',
+    );
+  }
+
   const seeds: SeedUser[] = [
     {
       username: 'admin',

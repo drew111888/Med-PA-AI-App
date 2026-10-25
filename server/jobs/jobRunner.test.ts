@@ -124,6 +124,12 @@ describe('retry + failure surfacing', () => {
     expect(job?.status).toBe('failed');
     expect(job?.attempts).toBe(2);
     expect(job?.lastError).toMatch(/boom/);
+
+    // last_error is encrypted at rest; mapRow/getJob decrypts it to readable text.
+    const rawErr = db.prepare('SELECT last_error FROM jobs WHERE id=?').get(jobId) as any;
+    expect(rawErr.last_error.startsWith('enc:v1:')).toBe(true);
+    expect(rawErr.last_error).not.toContain('boom');
+
     const failures = audit.all().filter((a) => a.action === 'job_failed');
     expect(failures.length).toBeGreaterThan(0);
     db.close();

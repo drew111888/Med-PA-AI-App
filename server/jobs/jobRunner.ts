@@ -175,9 +175,11 @@ export class JobRunner {
   }
 
   private setStatus(id: string, status: JobStatus, attempts: number, lastError?: string): void {
+    // last_error can carry PHI-adjacent detail; encrypt at rest when present.
+    const lastErrorEnc = lastError != null ? encryptField(lastError, this.encKey) : null;
     this.db
       .prepare('UPDATE jobs SET status=?, attempts=?, last_error=?, updated_at=? WHERE id=?')
-      .run(status, attempts, lastError ?? null, new Date().toISOString(), id);
+      .run(status, attempts, lastErrorEnc, new Date().toISOString(), id);
   }
 
   private mapRow(row: any): JobRow {
@@ -192,7 +194,11 @@ export class JobRunner {
       payload: JSON.parse(payloadJson),
       status: row.status,
       attempts: row.attempts,
-      lastError: row.last_error,
+      // Decrypt last_error; tolerate legacy plaintext via decryptField passthrough.
+      lastError:
+        row.last_error != null && row.last_error !== ''
+          ? decryptField(row.last_error, this.encKey)
+          : null,
       idempotencyKey: row.idempotency_key,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

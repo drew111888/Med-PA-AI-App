@@ -142,6 +142,9 @@ export const OPEN_FOR_DEADLINE: AppealCaseState[] = [
   'approved',
   'handoff_generated',
   'needs_more_data',
+  // A failed-but-unsubmitted case must stay in the urgent/unknown queues so a
+  // pipeline error does not silently drop a case off the deadline radar.
+  'failed',
 ];
 
 // --- Authorization roles ---
