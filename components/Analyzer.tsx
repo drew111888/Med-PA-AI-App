@@ -197,8 +197,14 @@ const Analyzer: React.FC<AnalyzerProps> = ({ onNavigate }) => {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Medical Guidelines</label>
-                  <button onClick={() => fileInputRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
-                    {isParsing ? 'Parsing...' : 'Upload PDF'}
+                  {/* PDF parsing routed through the removed browser-AI shim —
+                      unavailable until a backend parse endpoint is wired. */}
+                  <button
+                    disabled
+                    title="Unavailable — backend replacement pending"
+                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-not-allowed flex items-center gap-1"
+                  >
+                    <Lock size={10} /> Upload PDF (unavailable)
                   </button>
                   <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept=".pdf,.txt" />
                 </div>
@@ -210,9 +216,16 @@ const Analyzer: React.FC<AnalyzerProps> = ({ onNavigate }) => {
                 <textarea rows={6} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Paste SOAP notes, H&P, or imaging results..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
 
-              <button onClick={handleAnalyze} disabled={loading || !guidelines || !notes} className="w-full py-5 bg-blue-600 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl shadow-xl hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-3 transition-all">
-                {loading ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
-                {loading ? 'Evaluating Clinical Necessity...' : 'Check Approval Risk'}
+              {/* Manual browser-AI analysis is UNAVAILABLE: the in-browser model
+                  path was removed for PHI safety and no backend replacement is
+                  wired yet. Control stays disabled and clearly marked. */}
+              <button
+                onClick={handleAnalyze}
+                disabled
+                title="Unavailable — backend replacement pending"
+                className="w-full py-5 bg-slate-100 text-slate-400 font-black uppercase tracking-[0.2em] text-xs rounded-2xl flex items-center justify-center gap-3 cursor-not-allowed"
+              >
+                <Lock size={16} /> Check Approval Risk — unavailable (backend replacement pending)
               </button>
           </div>
         </div>

@@ -216,8 +216,8 @@ const Appeals: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Denial Reason / Letter</label>
-                <button onClick={() => denialFileRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest flex items-center gap-1">
-                   {parsingDoc === 'DENIAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />} Upload Denial
+                <button disabled title="Unavailable — backend replacement pending" className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 cursor-not-allowed">
+                   <Lock size={10} /> Upload Denial (unavailable)
                 </button>
                 <input type="file" ref={denialFileRef} className="hidden" onChange={e => handleFileUpload(e, 'DENIAL')} accept=".pdf,.txt" />
               </div>
@@ -231,8 +231,8 @@ const Appeals: React.FC = () => {
                   <button onClick={() => setShowAssetDrawer('STATEMENTS')} className="text-[10px] font-black text-indigo-600 hover:underline uppercase tracking-widest flex items-center gap-1">
                     <BookMarked size={10} /> Library
                   </button>
-                   <button onClick={() => clinicalFileRef.current?.click()} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest flex items-center gap-1">
-                    {parsingDoc === 'CLINICAL' ? <Loader2 size={10} className="animate-spin" /> : <FileUp size={10} />} Records
+                   <button disabled title="Unavailable — backend replacement pending" className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 cursor-not-allowed">
+                    <Lock size={10} /> Records (unavailable)
                   </button>
                   <input type="file" ref={clinicalFileRef} className="hidden" onChange={e => handleFileUpload(e, 'CLINICAL')} accept=".pdf,.txt" />
                 </div>
@@ -240,9 +240,16 @@ const Appeals: React.FC = () => {
               <textarea rows={6} value={formData.clinicalEvidence} onChange={e => setFormData({...formData, clinicalEvidence: e.target.value})} placeholder="Paste supporting clinical findings or inject from library..." className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium leading-relaxed outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
 
-            <button onClick={handleGenerate} disabled={loading} className="w-full py-5 bg-blue-600 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl shadow-xl hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-3 transition-all">
-              {loading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-              {loading ? 'Drafting Evidence-Based Appeal...' : 'Generate Clinical Appeal'}
+            {/* Browser-AI appeal drafting removed for PHI safety; no backend
+                replacement wired yet. Use the verified case/packet pipeline
+                (Appeal Cases screen) instead. Control stays disabled. */}
+            <button
+              onClick={handleGenerate}
+              disabled
+              title="Unavailable — backend replacement pending"
+              className="w-full py-5 bg-slate-100 text-slate-400 font-black uppercase tracking-[0.2em] text-xs rounded-2xl flex items-center justify-center gap-3 cursor-not-allowed"
+            >
+              <Lock size={18} /> Generate Clinical Appeal — unavailable (backend replacement pending)
             </button>
           </div>
         </div>

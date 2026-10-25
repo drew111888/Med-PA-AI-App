@@ -3,9 +3,10 @@
  *
  * This is the GLOBAL job queue, not a per-case view. It surfaces the real
  * attempts / status / lastError (decrypted server-side) so a reviewer can see
- * pipeline run health. Status only — NO working Retry this increment; the retry
- * control renders disabled and labelled "next increment". Loading / empty /
- * error states are explicit and distinct (never silently empty).
+ * pipeline run health. Status only — retry is a CASE action (there is no
+ * job-retry endpoint), so each row points the reviewer to open the affected
+ * case to re-run it. Loading / empty / error states are explicit and distinct
+ * (never silently empty).
  *
  * Author / Prepared by: Anthony LaVear
  * Title: Lead BSA, SDIT Architecture
@@ -106,14 +107,15 @@ const WorkflowRuns: React.FC = () => {
                 <div className="text-right shrink-0">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Attempts {j.attempts}</p>
                   <p className="text-[9px] text-slate-300 font-bold">{j.updatedAt}</p>
-                  {/* Retry is intentionally display-only this increment. */}
-                  <button
-                    disabled
-                    title="Retry is wired in a later increment"
-                    className="mt-1 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded bg-slate-100 text-slate-400 cursor-not-allowed"
+                  {/* Retry is a CASE action (POST /api/cases/:id/retry), not a job
+                      action — there is no job-retry endpoint. Open the affected
+                      case to re-run its pipeline. */}
+                  <span
+                    title="Retry is a case action — open the affected case to re-run its pipeline"
+                    className="mt-1 inline-block px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded bg-slate-100 text-slate-400"
                   >
-                    Retry (next increment)
-                  </button>
+                    Retry: open the case
+                  </span>
                 </div>
               </div>
               {j.lastError && (

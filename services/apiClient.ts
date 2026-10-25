@@ -349,7 +349,71 @@ export interface HealthInfo {
   time: string;
 }
 
-// --- API surface (reads + auth only this increment; NO mutation methods) ---
+/**
+ * The stored handoff artifact returned by POST/GET /api/cases/:id/handoff.
+ * This is the HandoffPackage — NOT the full packet. `packetVersion` identifies
+ * exactly which approved version the artifact was generated for.
+ */
+export interface HandoffPackage {
+  caseId: string;
+  packetVersion: number;
+  carrier: string;
+  appealRoute: string | null;
+  /** Null when the deadline could not be calculated. */
+  appealDeadline: string | null;
+  letter: string;
+  evidenceCount: number;
+  generatedAt: string;
+}
+
+/**
+ * Fields for a HUMAN-ENTERED submission receipt. This records that a person
+ * transmitted the appeal out-of-band; it is NOT payer confirmation. The server
+ * maps missing required fields (channel/confirmationNumber) to 409, not 400.
+ */
+export interface SubmissionInput {
+  channel: string;
+  confirmationNumber: string;
+  submittedAt?: string;
+  note?: string;
+}
+
+/**
+ * Download the handoff artifact as a Blob.
+ *
+ * This is a SEPARATE helper (not the JSON request() path) so the download
+ * carries the bearer header: a plain <a href> cannot attach Authorization and
+ * would 401. It reads the token from the same in-memory tokenGetter, maps a 401
+ * through the onUnauthorized hook, and returns the Blob on 2xx or the mapped
+ * ApiError on any non-2xx / network failure. The caller parses the Blob JSON to
+ * display which packetVersion the artifact is for.
+ */
+const downloadHandoff = async (id: string): Promise<ApiResult<Blob>> => {
+  const headers: Record<string, string> = {};
+  const token = tokenGetter();
+  if (token) headers['authorization'] = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api/cases/${encodeURIComponent(id)}/handoff`, { headers });
+  } catch {
+    return { ok: false, kind: 'serverError', status: 0, message: errorMessage('serverError', 0) };
+  }
+
+  if (res.ok) {
+    const blob = await res.blob();
+    return { ok: true, data: blob };
+  }
+
+  const kind = kindForStatus(res.status);
+  if (kind === 'unauthorized' && onUnauthorized) onUnauthorized();
+  // Best-effort error message from the JSON body (may not be JSON on a download path).
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error) };
+};
+
+// --- API surface: reads + auth (Pkg 1&2) + mutations/runs (Pkg 3&4) ---
+// The server derives the audit actor from the token; NO method ever sends `actor`.
 
 export const api = {
   // Public (no bearer).
@@ -367,7 +431,63 @@ export const api = {
   summary: () => request<SummaryInfo>('/summary'),
   listJobs: () => request<{ jobs: JobRow[] }>('/jobs'),
   getReceipt: (id: string) => request<ReceiptInfo>(`/cases/${encodeURIComponent(id)}/receipt`),
+
+  // --- Mutations (Package 3) ---
+
+  /** Approve the EXACT reviewed version. Body is {packetVersion} only. */
+  approveCase: (id: string, packetVersion: number) =>
+    request<{ ok: true; state: 'approved'; approvedVersion: number }>(
+      `/cases/${encodeURIComponent(id)}/approve`,
+      { method: 'POST', body: JSON.stringify({ packetVersion }) },
+    ),
+
+  /** Generate the handoff artifact (NOT submission). Enabled only when approved. */
+  generateHandoff: (id: string) =>
+    request<{ ok: true; state: 'handoff_generated'; package: HandoffPackage }>(
+      `/cases/${encodeURIComponent(id)}/handoff`,
+      { method: 'POST' },
+    ),
+
+  /** Download the handoff artifact as a Blob (bearer carried — see helper). */
+  downloadHandoff,
+
+  /** Record a HUMAN-ENTERED submission receipt. Server validates (missing field -> 409). */
+  recordSubmission: (id: string, input: SubmissionInput) => {
+    const body: Record<string, string> = {
+      channel: input.channel,
+      confirmationNumber: input.confirmationNumber,
+    };
+    if (input.submittedAt !== undefined) body.submittedAt = input.submittedAt;
+    if (input.note !== undefined) body.note = input.note;
+    return request<{ ok: true; caseId: string; state: 'submitted' }>(
+      `/cases/${encodeURIComponent(id)}/submit`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  },
+
+  // --- Runs & retry (Package 4) ---
+
+  /** Re-run the pipeline for a failed / needs_more_data / needs_review case. */
+  retryCase: (id: string) =>
+    request<{ caseId: string; state: AppealCaseState; packetReady: boolean }>(
+      `/cases/${encodeURIComponent(id)}/retry`,
+      { method: 'POST' },
+    ),
+
+  /** Synchronous drain of a single denial — returns the resulting case state. */
+  runDenial: (denialId: string) =>
+    request<{ jobId: string; caseId: string | null; state: AppealCaseState | null }>(
+      `/run/denial/${encodeURIComponent(denialId)}`,
+      { method: 'POST' },
+    ),
+
+  /** Synchronous poll drain — returns {processed, cases}, NOT a case state. */
+  runPoll: (since?: string) =>
+    request<{ processed: number; cases: number }>(
+      '/run/poll',
+      { method: 'POST', body: JSON.stringify({ since }) },
+    ),
 };
 
-// Exposed only for focused unit testing of the typed-outcome mapping.
-export const __test__ = { request };
+// Exposed only for focused unit testing of the typed-outcome mapping + download.
+export const __test__ = { request, downloadHandoff };
