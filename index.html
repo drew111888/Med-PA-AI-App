@@ -9,9 +9,11 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
     </style>
-    <!-- Shim to support process.env in browser-native ESM/Vite environments -->
+    <!-- Shim for process.env in browser-native ESM. No secrets here: the client
+         only ever knows the local API base URL; all AI/EHR calls go through the
+         local backend. -->
     <script>
-      window.process = { env: { API_KEY: "" } };
+      window.process = { env: { MEDAUTH_API_BASE: "http://127.0.0.1:4000" } };
     </script>
 <script type="importmap">
 {

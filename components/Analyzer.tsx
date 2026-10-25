@@ -11,12 +11,19 @@ import { logAction } from '../services/auditService.ts';
 import { getCurrentUser } from '../services/authService.ts';
 import { hasPermission } from '../services/permissionsService.ts';
 import { saveRecord } from '../services/historyService.ts';
-import { AnalysisResult, MedicalPolicy } from '../types.ts';
+import { AnalysisResult, MedicalPolicy, View } from '../types.ts';
 
 const STORAGE_KEY_CPT = 'medauth_analyzer_cpt_draft';
 const STORAGE_KEY_NOTES = 'medauth_analyzer_notes_draft';
 
-const Analyzer: React.FC = () => {
+// Draft handed off from the Analyzer to the Appeal Builder.
+const APPEAL_HANDOFF_KEY = 'medauth_appeal_handoff';
+
+interface AnalyzerProps {
+  onNavigate?: (view: View) => void;
+}
+
+const Analyzer: React.FC<AnalyzerProps> = ({ onNavigate }) => {
   const [cptCode, setCptCode] = useState(() => localStorage.getItem(STORAGE_KEY_CPT) || '');
   const [guidelines, setGuidelines] = useState(''); 
   const [notes, setNotes] = useState(() => localStorage.getItem(STORAGE_KEY_NOTES) || '');
@@ -273,7 +280,21 @@ const Analyzer: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-blue-600 p-8 rounded-[40px] text-white shadow-2xl flex items-center justify-between group cursor-pointer hover:bg-blue-700 transition-all border border-blue-400/30">
+              <button
+                onClick={() => {
+                  // Carry the analysis evidence into the Appeal Builder.
+                  const handoff = {
+                    cptCode,
+                    denialReason: result.missingRequirements?.length
+                      ? `Documentation deficits identified: ${result.missingRequirements.join('; ')}`
+                      : result.reasoning,
+                    clinicalEvidence: notes,
+                  };
+                  localStorage.setItem(APPEAL_HANDOFF_KEY, JSON.stringify(handoff));
+                  onNavigate?.(View.APPEALS);
+                }}
+                className="w-full bg-blue-600 p-8 rounded-[40px] text-white shadow-2xl flex items-center justify-between group cursor-pointer hover:bg-blue-700 transition-all border border-blue-400/30 text-left"
+              >
                 <div>
                   <p className="font-black text-xl mb-1">Authorization Flagged?</p>
                   <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest">Launch Appeal Builder with this Evidence</p>
@@ -281,7 +302,7 @@ const Analyzer: React.FC = () => {
                 <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center group-hover:bg-white/30 transition-all shadow-inner border border-white/20">
                    <ArrowRight size={28} />
                 </div>
-              </div>
+              </button>
             </div>
           )}
         </div>

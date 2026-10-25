@@ -43,6 +43,7 @@ export const canAccessView = (user: User | null, view: View): boolean => {
   if (!user) return false;
   switch (view) {
     case View.DASHBOARD: return hasPermission(user, 'view_dashboard');
+    case View.CASES: return hasPermission(user, 'view_history');
     case View.ANALYZER: return hasPermission(user, 'run_clinical_analysis');
     case View.APPEALS: return hasPermission(user, 'build_appeals');
     case View.HISTORY: return hasPermission(user, 'view_history');

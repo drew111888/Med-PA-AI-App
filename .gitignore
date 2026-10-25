@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local database and generated data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local env
+.env
+.env.local
