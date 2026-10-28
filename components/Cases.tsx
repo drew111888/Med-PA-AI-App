@@ -871,12 +871,12 @@ const CaseReview: React.FC<{
       {audit.length > 0 && (
         <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100">
           <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-3">Audit trail</p>
-          <div className="space-y-1.5">
+          <div className="space-y-3 sm:space-y-1.5">
             {audit.map((a) => (
-              <div key={a.id} className="flex items-start gap-2 text-[10px]">
-                <span className="font-black text-slate-500 uppercase tracking-widest shrink-0">{a.action}</span>
-                <span className="text-slate-400">by {a.actor}{a.detail ? ` — ${a.detail}` : ''}</span>
-                <span className="text-slate-300 ml-auto shrink-0">{a.createdAt}</span>
+              <div key={a.id} className="flex min-w-0 flex-col items-start gap-1 text-[11px] sm:flex-row sm:gap-2 sm:text-[10px]">
+                <span className="min-w-0 max-w-full break-words font-black text-slate-700 uppercase tracking-wider">{a.action}</span>
+                <span className="min-w-0 max-w-full break-words text-slate-600 sm:flex-1">by {a.actor}{a.detail ? ` — ${a.detail}` : ''}</span>
+                <span className="max-w-full break-words text-slate-500 sm:ml-auto sm:shrink-0">{a.createdAt}</span>
               </div>
             ))}
           </div>
