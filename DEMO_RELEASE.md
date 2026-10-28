@@ -1,5 +1,7 @@
 # Synthetic application demo release
 
+> Current status (2026-10-28): the approved service/disk were created and the actual application is live at https://med-pa-synthetic-demo.onrender.com. See `HOSTED_ACCEPTANCE.md` for exact deployed commit, resource IDs, completed evidence and limits. The approval/setup descriptions below preserve the earlier handoff context.
+
 This local release is based on accepted application commit `378141dcc5d5b7b41b67e99c79b4b7854ff7af82`. It is separate from Kiro's active PDF retry branch and the already published static concept. Do not deploy the older remote `main` in its place.
 
 ## Boundaries

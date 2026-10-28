@@ -1,5 +1,7 @@
 # Local synthetic application acceptance
 
+> Hosted follow-up (2026-10-28): `HOSTED_ACCEPTANCE.md` records the actual public deployment and browser/HTTP acceptance, separate from this historical local pass.
+
 Base: `378141dcc5d5b7b41b67e99c79b4b7854ff7af82`. Release branch: `codex/hosted-synthetic-demo`. All work was performed in a separate task worktree; the owner's checkout and Kiro's PDF retry work were preserved.
 
 ## Automated evidence

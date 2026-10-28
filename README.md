@@ -1,3 +1,5 @@
+> Live synthetic application demo: https://med-pa-synthetic-demo.onrender.com — temporary isolated sessions, fixed sample records and a deterministic AI stub. Never enter real patient data. See [HOSTED_ACCEPTANCE.md](HOSTED_ACCEPTANCE.md) for the exact deployed release, verified flows and remaining limits.
+
 > This branch contains the isolated synthetic application demo. See [DEMO_RELEASE.md](DEMO_RELEASE.md) for startup/hosting boundaries and [DEMO_ACCEPTANCE.md](DEMO_ACCEPTANCE.md) for executed tests. Use the demo entry, not the ordinary practice server, for public testing. Never enter real patient data.
 
 # MedAuth AI — Local-First Autonomous Denial Appeal System

@@ -1,5 +1,7 @@
 # Container and Render configuration gate
 
+> Later platform evidence (2026-10-28): Render built and ran the image, accepted the 1 GB mounted disk, and passed readiness plus durable case/receipt readback across rollout and explicit restart. See `HOSTED_ACCEPTANCE.md`. Local Docker tests remain unavailable; the original checklist below records the pre-deployment gate.
+
 Review began at `b68258a` and includes subsequent local packaging/readiness guards. The owner explicitly authorized local project tests, loopback-only listeners, disposable synthetic data, passing demo-branch pushes, and the specified Render service/disk/key setup. The subsequent guard patch passes local tests, type checking, and the demo build. Render image/platform acceptance remains unrun; this report does not certify a live deployment.
 
 ## Configuration checks
