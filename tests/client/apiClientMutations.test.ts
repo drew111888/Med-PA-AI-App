@@ -196,10 +196,25 @@ describe('recordSubmission + receipt readback', () => {
 
 describe('retryCase', () => {
   it('POSTs to /retry (no actor), carries the bearer header, maps 200 -> ok', async () => {
-    stubFetch(async () => makeResponse(200, { caseId: 'case_1', state: 'packet_ready', packetReady: true }));
+    stubFetch(async () =>
+      makeResponse(200, {
+        caseId: 'case_1',
+        state: 'packet_ready',
+        jobId: 'job_abc',
+        jobStatus: 'done',
+        attempts: 1,
+        packetReady: true,
+      }),
+    );
     const r = await api.retryCase('case_1');
     expect(isOk(r)).toBe(true);
-    if (isOk(r)) expect(r.data.state).toBe('packet_ready');
+    if (isOk(r)) {
+      expect(r.data.state).toBe('packet_ready');
+      // Durable contract: the job id/status/attempts are surfaced to the client.
+      expect(r.data.jobId).toBe('job_abc');
+      expect(r.data.jobStatus).toBe('done');
+      expect(r.data.attempts).toBe(1);
+    }
     expect(calls[0].url).toContain('/api/cases/case_1/retry');
     expect(calls[0].init.method).toBe('POST');
     expect(bodyOf(calls[0])).not.toContain('actor');
@@ -209,6 +224,54 @@ describe('retryCase', () => {
   it('maps 409 -> conflict (not in a retryable state)', async () => {
     stubFetch(async () => makeResponse(409, { error: 'cannot retry from state submitted' }));
     expect(errKind(await api.retryCase('case_1'))).toBe('conflict');
+  });
+
+  it('populates ApiError.details {code,missing,action} from the enriched 409 body (denial_row_missing)', async () => {
+    stubFetch(async () =>
+      makeResponse(409, {
+        error: 'normalized denial record absent',
+        code: 'denial_row_missing',
+        missing: ['denial_row'],
+        action: 'Re-run intake or re-import the denial before retrying; the normalized denial record is absent.',
+      }),
+    );
+    const r = await api.retryCase('case_1');
+    expect(isOk(r)).toBe(false);
+    if (!isOk(r)) {
+      // 409 keeps its conflict kind; actionable detail is carried alongside.
+      expect(r.kind).toBe('conflict');
+      expect(r.status).toBe(409);
+      expect(r.details?.code).toBe('denial_row_missing');
+      expect(r.details?.missing).toEqual(['denial_row']);
+      expect(r.details?.action).toContain('re-import');
+    }
+  });
+
+  it('surfaces 422 distinctly (status 422 preserved + details.code) from the enriched evidence_incomplete body', async () => {
+    stubFetch(async () =>
+      makeResponse(422, {
+        error: 'evidence incomplete',
+        code: 'evidence_incomplete',
+        missing: ['claimId', 'carcCodes_or_rarcCodes'],
+        action: 'Supply the missing fields (claimId, carcCodes_or_rarcCodes), then retry.',
+      }),
+    );
+    const r = await api.retryCase('case_1');
+    expect(isOk(r)).toBe(false);
+    if (!isOk(r)) {
+      // 422 is not a dedicated kind; the UI distinguishes it via status/details.code.
+      expect(r.status).toBe(422);
+      expect(r.details?.code).toBe('evidence_incomplete');
+      expect(r.details?.missing).toEqual(['claimId', 'carcCodes_or_rarcCodes']);
+      expect(r.details?.action).toContain('Supply the missing fields');
+    }
+  });
+
+  it('leaves ApiError.details undefined for a plain error body (backward compatible)', async () => {
+    stubFetch(async () => makeResponse(409, { error: 'cannot retry' }));
+    const r = await api.retryCase('case_1');
+    expect(isOk(r)).toBe(false);
+    if (!isOk(r)) expect(r.details).toBeUndefined();
   });
 });
 

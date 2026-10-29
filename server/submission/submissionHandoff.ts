@@ -108,6 +108,9 @@ export const recordSubmission = (
       `handoff is stale (generated from v${c.handoffVersion}, current packet is v${c.packetVersion}); regenerate the handoff first`,
     );
   }
+  if (c.approvedVersion !== c.packetVersion || !c.approvedBy || !c.approvedAt) {
+    throw new SubmissionError('current packet approval is missing or revoked; re-approve and regenerate the handoff first');
+  }
   if (!receipt?.channel || !receipt?.confirmationNumber) {
     throw new SubmissionError('submission receipt requires channel and confirmationNumber');
   }

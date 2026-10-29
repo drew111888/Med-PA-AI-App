@@ -20,7 +20,7 @@ const testApp = () => {
 };
 
 async function withServer<T>(app: any, fn: (base: string) => Promise<T>): Promise<T> {
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   const port = (server.address() as any).port;
   try {

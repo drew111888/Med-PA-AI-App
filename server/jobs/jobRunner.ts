@@ -40,6 +40,9 @@ export interface JobRow {
   updatedAt: string;
 }
 
+/** Status reads do not need to decrypt or parse a denial narrative payload. */
+export type JobMetadata = Omit<JobRow, 'payload'>;
+
 export interface JobRunnerOptions {
   maxAttempts?: number;
 }
@@ -83,9 +86,66 @@ export class JobRunner {
     return this.enqueue('process_denial', { denial }, `denial:${denialId}`);
   }
 
+  /**
+   * Enqueue (or re-activate) a durable process_denial job for a RETRY.
+   *
+   * Retry differs from an initial enqueue: a human is explicitly asking to
+   * re-run a held/failed case, so a prior `denial:<id>` job that has already
+   * reached a terminal state (done/failed) must be RE-QUEUED rather than
+   * returned inert. Reconciliation rules (single durable job per denial, keyed
+   * on `denial:<id>`):
+   *   - no existing job      -> create a fresh queued job,
+   *   - queued/running        -> reconcile: return the SAME job (no second job),
+   *   - done/failed (terminal)-> re-queue the SAME row (same id, preserved
+   *                              attempt history) with a refreshed payload.
+   * This keeps exactly one job per denial while making retry genuinely re-run.
+   */
+  enqueueRetryProcessDenial(denial: unknown, denialId: string): string {
+    const key = `denial:${denialId}`;
+    const existing = this.db
+      .prepare('SELECT id, status FROM jobs WHERE idempotency_key = ?')
+      .get(key) as any;
+    if (!existing) {
+      return this.enqueue('process_denial', { denial }, key);
+    }
+    if (existing.status === 'queued' || existing.status === 'running') {
+      // An in-flight retry is already pending; reconcile to it.
+      return existing.id;
+    }
+    // Terminal: re-queue the same durable row so the retry actually re-runs.
+    // Attempts are preserved as the job's cumulative history.
+    this.db
+      .prepare(
+        `UPDATE jobs SET status='queued', payload_enc=?, last_error=NULL, updated_at=? WHERE id=?`,
+      )
+      .run(encryptField(JSON.stringify({ denial }), this.encKey), new Date().toISOString(), existing.id);
+    return existing.id;
+  }
+
   getJob(id: string): JobRow | null {
     const row = this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as any;
     return row ? this.mapRow(row) : null;
+  }
+
+  /** Look up the single durable job for an idempotency key (or null). */
+  getJobByIdempotencyKey(key: string): JobRow | null {
+    const row = this.db.prepare('SELECT * FROM jobs WHERE idempotency_key = ?').get(key) as any;
+    return row ? this.mapRow(row) : null;
+  }
+
+  /**
+   * The durable job backing a denial, keyed on `denial:<id>`. Exactly one such
+   * job exists per denial (enqueue/retry reconcile on this key), so this is the
+   * canonical "latest job" for a case's denial.
+   */
+  getLatestJobForDenial(denialId: string): JobMetadata | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, type, status, attempts, last_error, idempotency_key, created_at, updated_at
+         FROM jobs WHERE idempotency_key = ?`,
+      )
+      .get(`denial:${denialId}`) as any;
+    return row ? this.mapMetadata(row) : null;
   }
 
   listJobs(status?: JobStatus): JobRow[] {
@@ -188,10 +248,13 @@ export class JobRunner {
       row.payload_enc != null && row.payload_enc !== ''
         ? decryptField(row.payload_enc, this.encKey)
         : row.payload || '{}';
+    return { ...this.mapMetadata(row), payload: JSON.parse(payloadJson) };
+  }
+
+  private mapMetadata(row: any): JobMetadata {
     return {
       id: row.id,
       type: row.type,
-      payload: JSON.parse(payloadJson),
       status: row.status,
       attempts: row.attempts,
       // Decrypt last_error; tolerate legacy plaintext via decryptField passthrough.

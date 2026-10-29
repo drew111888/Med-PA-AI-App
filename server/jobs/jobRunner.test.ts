@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openTestDb } from '../db/index.ts';
 import { JobRunner } from './jobRunner.ts';
+import { runStartupRecovery } from './startupRecovery.ts';
 import { CaseRepository } from '../repositories/caseRepository.ts';
 import { AuditRepository } from '../repositories/auditRepository.ts';
 import { SyntheticEhrAdapter } from '../adapters/synthetic/syntheticEhrAdapter.ts';
@@ -230,6 +231,76 @@ describe('retry + failure surfacing', () => {
     await runner.drain();
     expect(runner.getJob(jobId)?.status).toBe('done');
     expect(deps.cases.getCaseByDenial('den_001')?.state).toBe('packet_ready');
+    db.close();
+  });
+});
+
+describe('getLatestJobForDenial (D2 durable job lookup)', () => {
+  it('returns the durable row for a denial:<id> key', async () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+    const d = DENIALS.find((x) => x.id === 'den_001')!;
+    const jobId = runner.enqueueProcessDenial(d, d.id);
+
+    const latest = runner.getLatestJobForDenial('den_001');
+    expect(latest?.id).toBe(jobId);
+    expect(latest?.type).toBe('process_denial');
+    expect(latest?.status).toBe('queued');
+    expect(latest?.idempotencyKey).toBe('denial:den_001');
+
+    // No job for an unknown denial.
+    expect(runner.getLatestJobForDenial('den_absent')).toBeNull();
+    db.close();
+  });
+});
+
+describe('runStartupRecovery (D1 boot-time recovery)', () => {
+  it('recovers a MANUAL-mode interrupted process_denial job and leaves exactly one row set', async () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+    const d = DENIALS.find((x) => x.id === 'den_001')!;
+    const jobId = runner.enqueueProcessDenial(d, d.id);
+    // Simulate a crash: force the job to 'running' and never finished. The
+    // periodic scheduler is NOT involved here (manual mode).
+    db.prepare("UPDATE jobs SET status='running' WHERE id=?").run(jobId);
+
+    // Minimal Services-like object exposing the same JobRunner.
+    const { recovered, drained } = await runStartupRecovery({ jobs: runner });
+    expect(recovered).toBe(1);
+    expect(drained).toBeGreaterThanOrEqual(1);
+
+    // The recovered job drained to a terminal state and the case reached a
+    // consistent final state.
+    const job = runner.getJob(jobId);
+    expect(job?.status).toBe('done');
+    expect(deps.cases.getCaseByDenial('den_001')?.state).toBe('packet_ready');
+
+    // Exactly one denial + appeal_case + job row for this denial.
+    const denCount = (db.prepare('SELECT COUNT(*) c FROM denials WHERE id=?').get('den_001') as any).c;
+    const caseCount = (db.prepare('SELECT COUNT(*) c FROM appeal_cases WHERE denial_id=?').get('den_001') as any).c;
+    const jobCount = (db.prepare("SELECT COUNT(*) c FROM jobs WHERE idempotency_key=?").get('denial:den_001') as any).c;
+    expect(denCount).toBe(1);
+    expect(caseCount).toBe(1);
+    expect(jobCount).toBe(1);
+    db.close();
+  });
+
+  it('is a safe no-op when nothing is stuck (recovered 0, no new rows)', async () => {
+    const { deps, audit, db } = makeDeps();
+    const runner = new JobRunner(db, deps, audit, KEY);
+
+    const jobsBefore = (db.prepare('SELECT COUNT(*) c FROM jobs').get() as any).c;
+    const casesBefore = (db.prepare('SELECT COUNT(*) c FROM appeal_cases').get() as any).c;
+    const denialsBefore = (db.prepare('SELECT COUNT(*) c FROM denials').get() as any).c;
+
+    const { recovered, drained } = await runStartupRecovery({ jobs: runner });
+    expect(recovered).toBe(0);
+    expect(drained).toBe(0);
+
+    expect((db.prepare('SELECT COUNT(*) c FROM jobs').get() as any).c).toBe(jobsBefore);
+    expect((db.prepare('SELECT COUNT(*) c FROM appeal_cases').get() as any).c).toBe(casesBefore);
+    expect((db.prepare('SELECT COUNT(*) c FROM denials').get() as any).c).toBe(denialsBefore);
+    void deps;
     db.close();
   });
 });

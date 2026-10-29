@@ -52,6 +52,15 @@ export interface ApiError {
   message: string;
   code?: string;
   retryAfter?: number;
+  /**
+   * Additive, actionable error metadata copied verbatim from the backend body
+   * when present (FEAT-001 enriched 409/422 retry bodies). Lets the UI render a
+   * distinct, human-actionable message (e.g. 409 denial-row-missing vs 422
+   * evidence-incomplete) rather than a generic error. `kind`/`status`/`message`
+   * are unchanged; 422 still maps to kind 'serverError' and is distinguished via
+   * `status === 422` or `details.code`.
+   */
+  details?: { code?: string; missing?: string[]; action?: string };
 }
 
 export type ApiResult<T> = { ok: true; data: T } | ApiError;
@@ -94,6 +103,25 @@ const kindForStatus = (status: number): ApiErrorKind => {
   return 'serverError'; // any other non-2xx (incl. 5xx)
 };
 
+/**
+ * Pull the additive actionable fields (code/missing/action) off a parsed error
+ * body. Returns undefined when none are present so ApiError.details stays
+ * omitted for plain errors (backward compatible).
+ */
+const detailsFromBody = (body: {
+  code?: unknown;
+  missing?: unknown;
+  action?: unknown;
+}): ApiError['details'] | undefined => {
+  const details: { code?: string; missing?: string[]; action?: string } = {};
+  if (typeof body.code === 'string') details.code = body.code;
+  if (Array.isArray(body.missing) && body.missing.every((m) => typeof m === 'string')) {
+    details.missing = body.missing as string[];
+  }
+  if (typeof body.action === 'string') details.action = body.action;
+  return Object.keys(details).length > 0 ? details : undefined;
+};
+
 interface RequestOptions {
   /** Omit the Authorization header (public endpoints: health, login). */
   anonymous?: boolean;
@@ -128,11 +156,25 @@ const request = async <T>(path: string, init: RequestInit = {}, opts: RequestOpt
     return { ok: true, data };
   }
 
-  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string; retryAfter?: number };
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    retryAfter?: number;
+    missing?: string[];
+    action?: string;
+  };
   const kind = DEMO_MODE && (res.status === 401 || (res.status === 403 && /expir/i.test(body.code || body.error || '')))
     ? 'expired' : kindForStatus(res.status);
-  const error: ApiError = { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error),
-    ...(body.code ? { code: body.code } : {}), ...(body.retryAfter != null ? { retryAfter: body.retryAfter } : {}) };
+  const details = detailsFromBody(body);
+  const error: ApiError = {
+    ok: false,
+    kind,
+    status: res.status,
+    message: errorMessage(kind, res.status, body.error),
+    ...(body.code ? { code: body.code } : {}),
+    ...(body.retryAfter != null ? { retryAfter: body.retryAfter } : {}),
+    ...(details ? { details } : {}),
+  };
   if (!opts.anonymous && requestToken === tokenGetter() && (kind === 'unauthorized' || kind === 'expired') && onUnauthorized) onUnauthorized(error, requestToken);
   return error;
 };
@@ -303,6 +345,20 @@ export interface AuditEntry {
 export interface CaseDetail {
   case: AppealCase;
   audit: AuditEntry[];
+  /**
+   * Additive, server-derived durable job for this case's denial (FEAT-001:
+   * resolved via idempotency key `denial:<denialId>`). The UI DERIVES the retry
+   * status from this reloaded field so it survives refresh/remount, rather than
+   * from transient React state. Null when no durable job exists for the denial.
+   */
+  latestJob?: {
+    id: string;
+    status: JobStatus;
+    attempts: number;
+    lastError: string | null;
+    type: JobType;
+    updatedAt: string;
+  } | null;
 }
 
 /** List row as returned by GET /api/cases. */
@@ -435,10 +491,25 @@ const downloadHandoff = async (id: string): Promise<ApiResult<Blob>> => {
   }
 
   // Best-effort error message from the JSON body (may not be JSON on a download path).
-  const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    retryAfter?: number;
+    missing?: string[];
+    action?: string;
+  };
   const kind = DEMO_MODE && (res.status === 401 || (res.status === 403 && /expir/i.test(body.code || body.error || '')))
     ? 'expired' : kindForStatus(res.status);
-  const error: ApiError = { ok: false, kind, status: res.status, message: errorMessage(kind, res.status, body.error) };
+  const details = detailsFromBody(body);
+  const error: ApiError = {
+    ok: false,
+    kind,
+    status: res.status,
+    message: errorMessage(kind, res.status, body.error),
+    ...(body.code ? { code: body.code } : {}),
+    ...(body.retryAfter != null ? { retryAfter: body.retryAfter } : {}),
+    ...(details ? { details } : {}),
+  };
   if (token === tokenGetter() && (kind === 'unauthorized' || kind === 'expired') && onUnauthorized) onUnauthorized(error, token);
   return error;
 };
@@ -506,10 +577,14 @@ export const api = {
 
   /** Re-run the pipeline for a failed / needs_more_data / needs_review case. */
   retryCase: (id: string) =>
-    request<{ caseId: string; state: AppealCaseState; packetReady: boolean }>(
-      `/cases/${encodeURIComponent(id)}/retry`,
-      { method: 'POST' },
-    ),
+    request<{
+      caseId: string;
+      state: AppealCaseState;
+      jobId: string;
+      jobStatus: JobStatus | null;
+      attempts: number;
+      packetReady: boolean;
+    }>(`/cases/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
 
   /** Synchronous drain of a single denial — returns the resulting case state. */
   runDenial: (denialId: string) =>

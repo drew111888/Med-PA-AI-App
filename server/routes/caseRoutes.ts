@@ -16,8 +16,6 @@ import type { EHRPort } from '../ports/ehrPort.ts';
 import type { UserRepository } from '../auth/userRepository.ts';
 import { requireAuth, requirePermission } from '../auth/middleware.ts';
 import { intakeDenialFromPdf } from '../intake/denialIntake.ts';
-import { processDenial } from '../pipeline/orchestrator.ts';
-import type { Denial } from '../domain/types.ts';
 import {
   generateHandoff,
   recordSubmission,
@@ -28,7 +26,7 @@ import { OPEN_FOR_DEADLINE, type AppealCaseState } from '../domain/types.ts';
 
 export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRepository): Router => {
   const router = Router();
-  const { cases, audit, jobs, ai, orchestratorDeps } = services;
+  const { cases, audit, jobs, ai } = services;
 
   // States from which a case may be re-run (resumed/repaired). Mirrors the
   // orchestrator RESUMABLE set's human-actionable subset: a failed run plus the
@@ -60,7 +58,23 @@ export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRe
   router.get('/cases/:id', requirePermission('view_cases'), (req, res) => {
     const c = cases.getCase(req.params.id);
     if (!c) return res.status(404).json({ error: 'case not found' });
-    res.json({ case: c, audit: audit.forCase(c.id) });
+    // Additive durable-job view: the single denial:<id> job backing this case,
+    // so the client can reflect the real retry status/attempts after a refresh.
+    const latestJob = jobs.getLatestJobForDenial(c.denialId);
+    res.json({
+      case: c,
+      audit: audit.forCase(c.id),
+      latestJob: latestJob
+        ? {
+            id: latestJob.id,
+            status: latestJob.status,
+            attempts: latestJob.attempts,
+            lastError: latestJob.lastError,
+            type: latestJob.type,
+            updatedAt: latestJob.updatedAt,
+          }
+        : null,
+    });
   });
 
   // --- Approval (approve_appeal). Version-checked, fail-closed. ---
@@ -115,18 +129,75 @@ export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRe
         return res.status(409).json({ error: `cannot retry from state ${c.state}` });
       }
 
-      // Resolve the underlying denial for this case (synthetic/local source).
-      const denials = await ehr.discoverDenials();
-      const denial: Denial | undefined = denials.find((d) => d.id === c.denialId);
+      // Reconstruct the denial from PERSISTED normalized DB state — NOT from EHR
+      // discovery. This works identically for PDF- and API-sourced cases and
+      // requires no EHR external reference. Provenance (source) is read back
+      // verbatim; the stored denial's identity/source is never mutated on retry.
+      const denial = cases.getDenial(c.denialId);
       if (!denial) {
-        return res.status(409).json({ error: `denial ${c.denialId} is no longer discoverable; cannot retry` });
+        return res.status(409).json({
+          error: `denial ${c.denialId} has no persisted record; cannot retry`,
+          code: 'denial_row_missing',
+          missing: ['denial_row'],
+          action:
+            'Re-run intake or re-import the denial before retrying; the normalized denial record is absent.',
+        });
       }
 
-      // Re-run through the orchestrator directly: its resume branch updates the
-      // existing case rather than creating a second one, and insertDenial is
-      // idempotent on the denial id (no PRIMARY KEY violation, no duplicate).
-      const result = await processDenial(orchestratorDeps, denial);
-      res.json({ caseId: result.caseId, state: result.state, packetReady: result.packetReady });
+      // Validate mandatory normalized fields before enqueueing. Never fabricate:
+      // a genuinely missing field returns an explicit, actionable blocker naming
+      // exactly what is absent. (The denial DATE is intentionally NOT required —
+      // a missing date is a legitimate needs_review outcome the pipeline already
+      // surfaces, not a retry blocker.)
+      const missing: string[] = [];
+      if (!denial.claimId) missing.push('claimId');
+      if (denial.carcCodes.length === 0 && denial.rarcCodes.length === 0) {
+        missing.push('carcCodes_or_rarcCodes');
+      }
+      if (missing.length > 0) {
+        return res.status(422).json({
+          error: `denial ${denial.id} is missing required fields for retry: ${missing.join(', ')}`,
+          code: 'evidence_incomplete',
+          missing,
+          action: 'Supply the missing fields (' + missing.join(', ') + ') upstream, then retry.',
+        });
+      }
+
+      // Audit the human who initiated the retry. The actor is ALWAYS the
+      // server-derived authenticated user id (never a body value). Processing
+      // steps the orchestrator performs remain attributed to 'system'.
+      audit.log({
+        caseId: c.id,
+        actor: req.authUser!.id,
+        action: 'retry_requested',
+        detail: `denial ${denial.id}; prior state ${c.state}`,
+      });
+
+      // Route through the durable job runner. enqueueRetryProcessDenial keys on
+      // `denial:<id>`: if a retry job for this denial is already queued/running,
+      // the SAME job id is returned (reconciliation, no conflicting second job);
+      // a prior terminal job for this denial is re-queued (same row) so the
+      // retry genuinely re-runs rather than returning an inert done/failed job.
+      // The orchestrator's resume branch updates the EXISTING case and
+      // insertDenial is id-idempotent, so
+      // no duplicate case/denial/packet rows are created. A successful REQUEST
+      // does NOT imply COMPLETED: we drain, then return the ACTUAL resulting
+      // case state plus job id/status/attempts so the client can distinguish
+      // accepted/attempted from completed/approved.
+      const jobId = jobs.enqueueRetryProcessDenial(denial, denial.id);
+      await jobs.drain();
+      const after = cases.getCase(c.id);
+      const job = jobs.getJob(jobId);
+      const state = after?.state ?? c.state;
+      res.json({
+        caseId: c.id,
+        state,
+        jobId,
+        jobStatus: job?.status ?? null,
+        attempts: job?.attempts ?? 0,
+        // DERIVED convenience (backward compatible), NOT an asserted success.
+        packetReady: state === 'packet_ready',
+      });
     } catch (err) {
       next(err);
     }
@@ -186,10 +257,43 @@ export const createCaseRouter = (services: Services, ehr: EHRPort, users: UserRe
     }
   });
 
-  // Download the generated handoff artifact.
+  // Download only the current, still-approved operational handoff. Retaining an
+  // encrypted old artifact for audit does not make it safe to send after a
+  // packet revision or approval revocation. Historical downloads are not exposed.
   router.get('/cases/:id/handoff', requirePermission('view_cases'), (req, res) => {
+    const c = cases.getCase(req.params.id);
+    if (!c) return res.status(404).json({ error: 'case not found' });
+    if (!c.hasHandoff) return res.status(404).json({ error: 'no handoff generated for this case' });
+    if (c.handoffVersion !== c.packetVersion) {
+      return res.status(409).json({
+        error: `handoff is stale (generated from v${c.handoffVersion}, current packet is v${c.packetVersion})`,
+        code: 'handoff_stale',
+        action: 'Review and approve the current packet, then generate a new handoff before downloading.',
+      });
+    }
+    if (
+      !c.packet ||
+      c.approvedVersion !== c.packetVersion ||
+      !c.approvedBy ||
+      !c.approvedAt ||
+      (c.state !== 'handoff_generated' && c.state !== 'submitted')
+    ) {
+      return res.status(409).json({
+        error: 'handoff no longer has current packet approval',
+        code: 'handoff_approval_invalid',
+        action: 'Review and approve the current packet, then generate a new handoff before downloading.',
+      });
+    }
     const handoff = cases.getHandoff(req.params.id);
     if (!handoff) return res.status(404).json({ error: 'no handoff generated for this case' });
+    const artifact = handoff as { caseId?: unknown; packetVersion?: unknown };
+    if (artifact.caseId !== c.id || artifact.packetVersion !== c.packetVersion) {
+      return res.status(409).json({
+        error: 'handoff artifact does not match the current case and packet version',
+        code: 'handoff_stale',
+        action: 'Generate a new handoff from the current approved packet before downloading.',
+      });
+    }
     res.setHeader('content-disposition', `attachment; filename="handoff_${req.params.id}.json"`);
     res.json(handoff);
   });

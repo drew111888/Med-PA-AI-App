@@ -8,7 +8,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDemoApp } from './index.ts';
@@ -37,6 +38,17 @@ const running: Running[] = [];
 // Synthetic test key only. Tests must never read host credentials or real data.
 const TEST_KEY = 'synthetic-http-acceptance-encryption-key';
 const CASE = 'case_den_001';
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+
+/** Mutate only the test-owned generation to model interrupted/stale state. */
+async function sandboxDb<T>(host: Running, session: Envelope, fn: (db: InstanceType<typeof DatabaseSync>) => T): Promise<T> {
+  const directory = join(host.dataDir, 'sandboxes', session.sandboxId);
+  const generations = await readdir(directory);
+  expect(generations).toHaveLength(1);
+  const db = new DatabaseSync(join(directory, generations[0], 'state.sqlite'));
+  try { return fn(db); } finally { db.close(); }
+}
 
 async function launch(overrides: Partial<Options> = {}, existingDir?: string): Promise<Running> {
   const dataDir = existingDir ?? await mkdtemp(join(tmpdir(), 'medauth-demo-http-'));
@@ -282,8 +294,18 @@ describe('public demo — fixed synthetic workflow only', () => {
     expect((await api(host, 'POST', `/api/cases/${c.id}/handoff`, session.token, {})).status).toBe(409);
     const summary = await api(host, 'GET', '/api/summary', session.token);
     expect(summary.body.unknownDeadlines.some((item: any) => item.caseId === c.id && item.daysRemaining === null)).toBe(true);
+    const beforeRetry = await api(host, 'GET', `/api/cases/${c.id}`, session.token);
+    expect(beforeRetry.body.latestJob.status).toBe('done');
+    expect(beforeRetry.body.latestJob.attempts).toBe(1);
     const unavailableRetry = await api(host, 'POST', `/api/cases/${c.id}/retry`, session.token, {});
     expect(unavailableRetry.status).toBe(403);
+    expect(unavailableRetry.body.code).toBe('demo_fixture_retry_unavailable');
+    // The core now supports persisted PDF retries, but the demo boundary has
+    // deliberately not expanded its intake/retry scope.
+    const afterRetry = await api(host, 'GET', `/api/cases/${c.id}`, session.token);
+    expect(afterRetry.body.latestJob).toEqual(beforeRetry.body.latestJob);
+    expect(afterRetry.body.case.state).toBe('needs_review');
+    expect(afterRetry.body.case.packet).toBeNull();
   });
 
   it('requires the reviewed version and a handoff, then generates a synthetic receipt without accepting text', async () => {
@@ -324,6 +346,133 @@ describe('public demo — fixed synthetic workflow only', () => {
     expect((await detail(host, session.token)).state).toBe('submitted');
     expect((await api(host, 'POST', `/api/cases/${CASE}/submit`, session.token, {})).status).toBe(409);
   });
+});
+
+describe('public demo — integrated durable retry and handoff contracts', () => {
+  it('keeps durable metadata and retry budgets isolated without decoding stored narratives', async () => {
+    const host = await launch({ limits: { maxRetriesPerCase: 1, mutationsPerMinute: 100 } });
+    const a = await start(host);
+    const b = await start(host);
+    const caseId = 'case_den_003';
+    expect((await intake(host, a.token, 'missing-evidence')).status).toBe(200);
+    expect((await intake(host, b.token, 'missing-evidence')).status).toBe(200);
+    const initialA = await api(host, 'GET', `/api/cases/${caseId}`, a.token);
+    const initialB = await api(host, 'GET', `/api/cases/${caseId}`, b.token);
+    expect(Object.keys(initialA.body.latestJob).sort()).toEqual([
+      'attempts', 'id', 'lastError', 'status', 'type', 'updatedAt',
+    ]);
+    expect(initialA.body.latestJob.status).toBe('done');
+    expect(initialA.body.latestJob.attempts).toBe(1);
+    expect(initialA.body.latestJob.id === initialB.body.latestJob.id).toBe(false);
+
+    await sandboxDb(host, a, db => db.prepare('UPDATE jobs SET payload_enc=?, payload=? WHERE id=?')
+      .run('enc:v1:unreadable-synthetic-payload', 'not-json', initialA.body.latestJob.id));
+    const metadataOnly = await api(host, 'GET', `/api/cases/${caseId}`, a.token);
+    expect(metadataOnly.status).toBe(200);
+    expect(metadataOnly.body.latestJob).toEqual(initialA.body.latestJob);
+    expect(metadataOnly.body.latestJob).not.toHaveProperty('payload');
+    expectPrivate(metadataOnly);
+
+    // The real retry reconstructs persisted normalized denial data and repairs
+    // the same durable row, instead of depending on its old narrative payload.
+    const retry = await api(host, 'POST', `/api/cases/${caseId}/retry`, a.token, {});
+    expect(retry.status).toBe(200);
+    expect(retry.body.jobId).toBe(initialA.body.latestJob.id);
+    expect(retry.body.jobStatus).toBe('done');
+    expect(retry.body.attempts).toBe(2);
+    expect(retry.body.state).toBe('needs_more_data');
+    const refreshed = await api(host, 'GET', `/api/cases/${caseId}`, a.token);
+    expect(refreshed.body.latestJob.id).toBe(retry.body.jobId);
+    expect(refreshed.body.latestJob.attempts).toBe(2);
+    expect((await api(host, 'GET', `/api/cases/${caseId}`, b.token)).body.latestJob).toEqual(initialB.body.latestJob);
+    expect((await api(host, 'POST', `/api/cases/${caseId}/retry`, a.token, {})).status).toBe(429);
+    // Tester A reaching its cap must not spend tester B's allowance.
+    expect((await api(host, 'POST', `/api/cases/${caseId}/retry`, b.token, {})).status).toBe(200);
+    expect((await api(host, 'GET', `/api/cases/${caseId}`, a.token)).body.latestJob).toEqual(refreshed.body.latestJob);
+  });
+
+  it('recovers an interrupted job once per reopened tester context without starting another worker', async () => {
+    const host = await launch();
+    const a = await start(host);
+    const b = await start(host);
+    const caseId = 'case_den_003';
+    expect((await intake(host, a.token, 'missing-evidence')).status).toBe(200);
+    expect((await intake(host, b.token, 'missing-evidence')).status).toBe(200);
+    const initialA = await api(host, 'GET', `/api/cases/${caseId}`, a.token);
+    const initialB = await api(host, 'GET', `/api/cases/${caseId}`, b.token);
+    await host.stop();
+    await sandboxDb(host, a, db => {
+      db.prepare("UPDATE appeal_cases SET state='failed' WHERE id=?").run(caseId);
+      db.prepare("UPDATE jobs SET status='running' WHERE id=?").run(initialA.body.latestJob.id);
+    });
+
+    const reopened = await launch({}, host.dataDir);
+    const recovered = await api(reopened, 'GET', `/api/cases/${caseId}`, a.token);
+    expect(recovered.status).toBe(200);
+    expect(recovered.body.case.state).toBe('needs_more_data');
+    expect(recovered.body.latestJob.id).toBe(initialA.body.latestJob.id);
+    expect(recovered.body.latestJob.status).toBe('done');
+    expect(recovered.body.latestJob.attempts).toBe(2);
+    expect((await api(reopened, 'GET', `/api/cases/${caseId}`, a.token)).body.latestJob).toEqual(recovered.body.latestJob);
+    expect((await api(reopened, 'GET', `/api/cases/${caseId}`, b.token)).body.latestJob).toEqual(initialB.body.latestJob);
+    await sandboxDb(reopened, a, db => {
+      expect((db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='job_recovery'").get() as any).n).toBe(1);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM jobs').get() as any).n).toBe(1);
+      expect((db.prepare('SELECT COUNT(*) AS n FROM appeal_cases').get() as any).n).toBe(1);
+      expect((db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE type='poll_denials'").get() as any).n).toBe(0);
+    });
+    await sandboxDb(reopened, b, db => {
+      expect((db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='job_recovery'").get() as any).n).toBe(0);
+    });
+
+    await reopened.stop();
+    const again = await launch({}, host.dataDir);
+    expect((await api(again, 'GET', `/api/cases/${caseId}`, a.token)).body.latestJob).toEqual(recovered.body.latestJob);
+    await sandboxDb(again, a, db => {
+      expect((db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='job_recovery'").get() as any).n).toBe(1);
+    });
+  });
+
+  for (const invalidation of ['packet_revision', 'approval_revoked'] as const) {
+    it(`rejects ${invalidation} downloads and receipts while another tester's current artifact stays valid`, async () => {
+      const host = await launch();
+      const a = await start(host);
+      const b = await start(host);
+      for (const session of [a, b]) {
+        expect((await intake(host, session.token)).status).toBe(200);
+        await approve(host, session.token);
+        expect((await api(host, 'POST', `/api/cases/${CASE}/handoff`, session.token, {})).status).toBe(200);
+      }
+      const currentB = await api(host, 'GET', `/api/cases/${CASE}/handoff`, b.token);
+      expect(currentB.status).toBe(200);
+      await sandboxDb(host, a, db => {
+        // No public packet edit/revocation endpoint is added for this fixture.
+        // Core regressions cover real packet hashing; here we verify that the
+        // gateway forwards the fail-closed version/approval invariant unchanged.
+        const versionChange = invalidation === 'packet_revision' ? 'packet_version=packet_version+1,' : '';
+        db.prepare(`UPDATE appeal_cases SET ${versionChange} approved_version=NULL, approved_by=NULL, approved_at=NULL WHERE id=?`).run(CASE);
+      });
+      const rejected = await api(host, 'GET', `/api/cases/${CASE}/handoff`, a.token);
+      expect(rejected.status).toBe(409);
+      expect(rejected.body.code).toBe(invalidation === 'packet_revision' ? 'handoff_stale' : 'handoff_approval_invalid');
+      expect(rejected.body).not.toHaveProperty('letter');
+      expect(rejected.headers.get('content-disposition')).toBeNull();
+      expectPrivate(rejected);
+      expect((await api(host, 'POST', `/api/cases/${CASE}/submit`, a.token, {})).status).toBe(409);
+      expect((await api(host, 'GET', `/api/cases/${CASE}/receipt`, a.token)).status).toBe(404);
+      await sandboxDb(host, a, db => {
+        expect((db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='submitted'").get() as any).n).toBe(0);
+      });
+
+      expect((await api(host, 'GET', `/api/cases/${CASE}/handoff`, b.token)).body).toEqual(currentB.body);
+      expect((await api(host, 'POST', `/api/cases/${CASE}/submit`, b.token, {})).status).toBe(200);
+      expect((await api(host, 'GET', `/api/cases/${CASE}/receipt`, b.token)).status).toBe(200);
+      // A valid current artifact remains available after its synthetic receipt.
+      const submittedDownload = await api(host, 'GET', `/api/cases/${CASE}/handoff`, b.token);
+      expect(submittedDownload.status).toBe(200);
+      expect(submittedDownload.body).toEqual(currentB.body);
+    });
+  }
 });
 
 describe('public demo — bounded resources and lifecycle', () => {

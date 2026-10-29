@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import type { Db } from '../db/index.ts';
 import { encryptField, decryptField } from '../db/crypto.ts';
 import type { Patient, Claim, Denial, AppealCaseState } from '../domain/types.ts';
+import { DenialSchema } from '../domain/types.ts';
 import type { AppealPacket } from '../domain/packet.ts';
 import type { Classification } from '../pipeline/classifier.ts';
 import type { GateResult } from '../pipeline/gateEngine.ts';
@@ -146,6 +147,35 @@ export class CaseRepository {
         now,
       );
     return true;
+  }
+
+  /**
+   * Reconstruct a fully-typed Denial from PERSISTED, normalized DB state.
+   *
+   * This is the source of truth for retry: the denials row carries everything
+   * needed (source, carrier, CARC/RARC codes, nullable denial date, encrypted
+   * raw text, external ref) regardless of whether the denial originated from an
+   * EHR API or a PDF intake. Provenance (`source`) is read back verbatim and
+   * never re-derived, so a retry cannot mutate the stored denial's identity or
+   * origin. Returns null when no row exists for the id.
+   */
+  getDenial(denialId: string): Denial | null {
+    const row = this.db.prepare('SELECT * FROM denials WHERE id = ?').get(denialId) as any;
+    if (!row) return null;
+    const denial: Denial = {
+      id: row.id,
+      claimId: row.claim_id,
+      source: row.source,
+      carrier: row.carrier,
+      carcCodes: row.carc_codes ? JSON.parse(row.carc_codes) : [],
+      rarcCodes: row.rarc_codes ? JSON.parse(row.rarc_codes) : [],
+      denialDate: row.denial_date ?? null,
+      rawText: row.raw_text_enc ? decryptField(row.raw_text_enc, this.encKey) : undefined,
+      externalRef: row.external_ref ?? undefined,
+    };
+    // Validate the reconstructed entity so it is identical in shape to the
+    // API/PDF intake paths; a malformed row surfaces loudly rather than silently.
+    return DenialSchema.parse(denial);
   }
 
   // --- Appeal cases ---

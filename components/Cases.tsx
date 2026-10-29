@@ -165,11 +165,7 @@ const Cases: React.FC = () => {
       )}
 
       {selectedId && conflictNotices[selectedId] && (
-        <div role="alert" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-xs space-y-1">
-          <p className="font-black uppercase tracking-widest">Action conflict — review refreshed case</p>
-          <p>{conflictNotices[selectedId].message}</p>
-          <p>Review the current case and packet version before taking another action.</p>
-        </div>
+        <ActionConflictNotice error={conflictNotices[selectedId]} />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -260,6 +256,55 @@ const Cases: React.FC = () => {
 
       {/* Global pipeline job queue (read-only). */}
       <WorkflowRuns refreshKey={jobsRevision} />
+    </div>
+  );
+};
+
+/** Parent-owned conflict details survive replacement of the review panel. */
+export const ActionConflictNotice: React.FC<{ error: ApiError }> = ({ error }) => (
+  <div role="alert" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-xs space-y-1">
+    <p className="font-black uppercase tracking-widest">
+      {error.details?.code === 'denial_row_missing'
+        ? 'Denial record missing (409) — cannot retry yet'
+        : 'Action conflict — review refreshed case'}
+    </p>
+    <p>{error.message}</p>
+    {Boolean(error.details?.missing?.length) && <p>Missing: {error.details!.missing!.map(label).join(', ')}</p>}
+    <p>{error.details?.action ?? (error.details?.code === 'denial_row_missing'
+      ? 'Re-import the denial before retrying; its normalized record is missing.'
+      : 'Review the current case and packet version before taking another action.')}</p>
+  </div>
+);
+
+/** Missing-denial 409 and incomplete-evidence 422 need different corrective actions. */
+export const RetryErrorLine: React.FC<{ error: ApiError }> = ({ error }) => {
+  const details = error.details;
+  const is409 = details?.code === 'denial_row_missing';
+  const is422 = error.status === 422 || details?.code === 'evidence_incomplete';
+
+  if (!is409 && !is422) return <ErrorLine error={error} />;
+
+  const heading = is422 ? 'Missing evidence (422) — cannot retry yet' : 'State conflict (409) — cannot retry yet';
+  const missing = details?.missing ?? [];
+  const action =
+    details?.action ??
+    (is422
+      ? 'Supply the missing evidence fields upstream, then retry.'
+      : 'The normalized denial record is absent — re-import the denial before retrying.');
+
+  return (
+    <div className="flex items-start gap-2 p-3 bg-rose-50 border border-rose-100 rounded-2xl text-rose-700 text-[11px] font-bold">
+      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+      <div className="space-y-1">
+        <p className="uppercase tracking-widest">{heading}</p>
+        <p className="font-medium">{error.message}</p>
+        {missing.length > 0 && (
+          <p className="font-medium">
+            <span className="uppercase tracking-widest">Missing:</span> {missing.map(label).join(', ')}
+          </p>
+        )}
+        <p className="font-medium">{action}</p>
+      </div>
     </div>
   );
 };
@@ -368,14 +413,22 @@ const RunControls: React.FC<{ onRan: () => Promise<void> }> = ({ onRan }) => {
 };
 
 /** Review of a single case plus the wired Package 3/4 mutation panels. */
-const CaseReview: React.FC<{
+export const CaseReview: React.FC<{
   detail: CaseDetail;
   capabilities: Capabilities;
   onMutated: (id: string, conflict?: ApiError) => Promise<void>;
 }> = ({ detail, capabilities, onMutated }) => {
   const canApprove = capabilities.canApprove;
   const { case: c, audit } = detail;
+  // Durable retry/job status is DERIVED from the server-reloaded detail so it
+  // survives refresh/remount. latestJob is the single source of truth; see D2.
+  const latestJob = detail.latestJob ?? null;
   const packet = c.packet;
+  const currentHandoff = Boolean(
+    c.hasHandoff && packet && c.handoffVersion === c.packetVersion &&
+    c.approvedVersion === c.packetVersion && c.approvedBy && c.approvedAt &&
+    (c.state === 'handoff_generated' || c.state === 'submitted'),
+  );
   const gate = c.gate;
   const cls = c.classification;
 
@@ -397,7 +450,7 @@ const CaseReview: React.FC<{
   const [generatedHandoff, setGeneratedHandoff] = useState<HandoffPackage | null>(null);
   const [downloadPending, setDownloadPending] = useState(false);
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
-  const [downloadedVersion, setDownloadedVersion] = useState<number | null>(null);
+  const [downloadRequestedVersion, setDownloadRequestedVersion] = useState<number | null>(null);
 
   // --- Submission receipt state ---
   const [channel, setChannel] = useState('payer_portal');
@@ -410,8 +463,14 @@ const CaseReview: React.FC<{
   const [receiptError, setReceiptError] = useState<ApiError | null>(null);
 
   // --- Retry state ---
+  // The retry contract is durable: a successful REQUEST does not imply COMPLETED.
+  // We do NOT keep job status in local state — after a retry we reload detail and
+  // render the server's latestJob (derived above), so the panel repaints from
+  // server truth and survives remount/refresh. retryAttempted only gates a
+  // transient in-flight hint; the displayed status always comes from latestJob.
   const [retryPending, setRetryPending] = useState(false);
   const [retryError, setRetryError] = useState<ApiError | null>(null);
+  const [retryAttempted, setRetryAttempted] = useState(false);
 
   // Load an existing receipt when one is already recorded for this case.
   const loadedReceiptFor = useRef<string | null>(null);
@@ -464,13 +523,13 @@ const CaseReview: React.FC<{
         // Parse the Blob JSON to surface which version the artifact is for.
         const text = await res.data.text();
         const pkg = JSON.parse(text) as Partial<HandoffPackage>;
-        if (typeof pkg.packetVersion === 'number') setDownloadedVersion(pkg.packetVersion);
         const url = URL.createObjectURL(res.data);
         const a = document.createElement('a');
         a.href = url;
         a.download = `handoff_${c.id}.json`;
         document.body.appendChild(a);
         a.click();
+        if (typeof pkg.packetVersion === 'number') setDownloadRequestedVersion(pkg.packetVersion);
         a.remove();
         URL.revokeObjectURL(url);
       } catch {
@@ -478,6 +537,7 @@ const CaseReview: React.FC<{
         setDownloadError({ ok: false, kind: 'serverError', status: 0, message: 'Downloaded artifact could not be read.' });
       }
     } else {
+      if (res.kind === 'conflict') await onMutated(c.id, res);
       setDownloadError(res);
     }
     setDownloadPending(false);
@@ -509,9 +569,16 @@ const CaseReview: React.FC<{
     setRetryPending(true); setRetryError(null);
     const res = await api.retryCase(c.id);
     if (isOk(res)) {
+      // No optimistic state advance: reload detail so the panel repaints from
+      // the server's durable latestJob (the authoritative job id/status/attempts).
+      setRetryAttempted(true);
       await onMutated(c.id);
     } else {
-      if (res.kind === 'conflict') await onMutated(c.id, res);
+      if (res.kind === 'conflict') {
+        // Reconciliation unmounts this panel. The full error remains parent-owned.
+        await onMutated(c.id, res);
+        return;
+      }
       setRetryError(res);
     }
     setRetryPending(false);
@@ -721,8 +788,8 @@ const CaseReview: React.FC<{
             </button>
             <button
               onClick={() => void handleDownloadHandoff()}
-              disabled={!c.hasHandoff || downloadPending}
-              title={!c.hasHandoff ? 'No handoff has been generated yet' : undefined}
+              disabled={!currentHandoff || downloadPending}
+              title={!currentHandoff ? 'A current handoff and approval for this packet version are required' : undefined}
               className="flex items-center gap-2 px-5 py-3 bg-white text-slate-900 border border-slate-200 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {downloadPending ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -737,8 +804,13 @@ const CaseReview: React.FC<{
               </p>
             </div>
           )}
-          {downloadedVersion != null && (
-            <p className="text-[11px] font-bold text-slate-600">Downloaded artifact for packet v{downloadedVersion}.</p>
+          {c.hasHandoff && !currentHandoff && (
+            <p role="status" className="text-[11px] font-bold text-amber-800">
+              This handoff is stale or no longer approved. Review the current packet and approval before generating a new handoff.
+            </p>
+          )}
+          {downloadRequestedVersion != null && (
+            <p className="text-[11px] font-bold text-slate-600">Download requested for packet v{downloadRequestedVersion}. Confirm the file was saved in your browser.</p>
           )}
           {handoffError && <ErrorLine error={handoffError} />}
           {downloadError && <ErrorLine error={downloadError} />}
@@ -821,7 +893,7 @@ const CaseReview: React.FC<{
               </div>}
               <button
                 onClick={() => void handleRecordSubmission()}
-                disabled={!submitFieldsValid || submitPending}
+                disabled={!currentHandoff || !submitFieldsValid || submitPending}
                 className="w-full py-4 bg-slate-900 text-white font-black uppercase tracking-[0.2em] text-xs rounded-2xl hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all"
               >
                 {submitPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
@@ -863,7 +935,21 @@ const CaseReview: React.FC<{
             {retryPending ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
             {retryPending ? 'Re-running…' : 'Retry (re-run pipeline)'}
           </button>
-          {retryError && <ErrorLine error={retryError} />}
+          {!latestJob && retryAttempted ? (
+            <p className="text-[10px] text-slate-500 font-medium">
+              Retry requested — refreshing durable job status from the server…
+            </p>
+          ) : null}
+          {retryError && <RetryErrorLine error={retryError} />}
+        </div>
+      )}
+
+      {/* Job execution remains visible independently of retry permissions/case state. */}
+      {latestJob && (
+        <div aria-label="Latest workflow job" className="p-4 rounded-2xl border border-slate-200 bg-slate-50 text-[11px] text-slate-600 space-y-1">
+          <p className="font-black uppercase tracking-widest">Latest workflow job</p>
+          <p>{latestJob.id} · {label(latestJob.status)} · attempts {latestJob.attempts}</p>
+          {latestJob.lastError && <p>Last error: {latestJob.lastError}</p>}
         </div>
       )}
 

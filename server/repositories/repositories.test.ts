@@ -60,6 +60,62 @@ describe('CaseRepository', () => {
     db.close();
   });
 
+  it('getDenial reconstructs a PDF-sourced denial from persisted state (rawText + provenance)', () => {
+    const db = openTestDb();
+    const repo = new CaseRepository(db, KEY);
+    repo.upsertPatient({ id: 'pat_001', mrn: 'm', name: 'n' });
+    repo.upsertClaim({ id: 'clm_001', patientId: 'pat_001', carrier: 'Anthem', cptCodes: ['72148'], dateOfService: '2026-09-10' });
+    const pdfDenial: Denial = {
+      id: 'den_pdf_rt',
+      claimId: 'clm_001',
+      source: 'pdf',
+      carrier: 'Anthem',
+      carcCodes: ['50'],
+      rarcCodes: ['N115'],
+      denialDate: '2026-10-01',
+      rawText: 'Not medically necessary per policy (PDF narrative).',
+      externalRef: 'PDF-RT-1',
+    };
+    repo.insertDenial(pdfDenial);
+
+    const got = repo.getDenial('den_pdf_rt');
+    expect(got).not.toBeNull();
+    expect(got).toEqual(pdfDenial); // identical shape, rawText decrypted, source preserved
+    db.close();
+  });
+
+  it('getDenial round-trips a null denialDate / null externalRef and undefined rawText', () => {
+    const db = openTestDb();
+    const repo = new CaseRepository(db, KEY);
+    repo.upsertPatient({ id: 'pat_001', mrn: 'm', name: 'n' });
+    repo.upsertClaim({ id: 'clm_001', patientId: 'pat_001', carrier: 'Anthem', cptCodes: ['72148'], dateOfService: '2026-09-10' });
+    const sparse: Denial = {
+      id: 'den_sparse_rt',
+      claimId: 'clm_001',
+      source: 'api',
+      carrier: 'Anthem',
+      carcCodes: ['50'],
+      rarcCodes: [],
+      denialDate: null,
+    };
+    repo.insertDenial(sparse);
+
+    const got = repo.getDenial('den_sparse_rt');
+    expect(got).not.toBeNull();
+    expect(got?.denialDate).toBeNull();
+    expect(got?.externalRef).toBeUndefined();
+    expect(got?.rawText).toBeUndefined();
+    expect(got?.source).toBe('api');
+    db.close();
+  });
+
+  it('getDenial returns null when the denial row is absent', () => {
+    const db = openTestDb();
+    const repo = new CaseRepository(db, KEY);
+    expect(repo.getDenial('den_missing')).toBeNull();
+    db.close();
+  });
+
   it('persists and reloads a full case (survives reopen within connection)', () => {
     const db = openTestDb();
     const repo = new CaseRepository(db, KEY);

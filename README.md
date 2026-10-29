@@ -139,3 +139,58 @@ typecheck, client build, and a live synthetic HTTP journey.
   must stay off until hardened.
 - **Real-model** local inference — the local provider runs a deterministic stub
   unless a real endpoint is configured; model output quality is unverified.
+
+## Product backlog
+
+Recorded **2026-10-28**. These are proposed capabilities, not implemented
+transport or production-readiness claims. The current demo remains synthetic
+only, with local-stub AI, no live payer delivery, and no automatic clinical
+approval or sending. Close the retry/handoff acceptance defects in
+`PDF_RETRY_HANDOFF.md` before adding delivery.
+
+### Shared evidence and distinct workflows
+
+| ID | Backlog item | Completion criteria |
+|---|---|---|
+| PA-01 | Shared evidence workspace | Reuse sourced chart evidence across **initial medical prior authorization**, **pre-service PA-denial appeal**, and **post-service claim reconsideration/appeal**, while preserving separate workflow types, required forms, deadlines, review gates, and case histories. Do not route one workflow using another workflow's rules. |
+| PA-02 | Clinician-reviewed PDF packet | Compile a readable cover, document index, required forms, and selected evidence into a PDF. Let a clinician inspect the exact compiled output before approval. Create an immutable packet version, content hash, and manifest of included documents, their versions, page ranges, and provenance; retain links to source evidence. Missing required material blocks preparation for sending. |
+| PA-03 | Verified payer routing | Resolve destination by payer, state, plan/product, and workflow. Record the official source, source/effective date, verification date and reviewer, required identifiers/forms, and channel restrictions. Unknown, expired, conflicting, or unverified routing requires review; never guess a fax number or apply a generic appeal window. Show the selected destination alongside the packet at final approval. |
+
+### Delivery and reconciliation
+
+| ID | Backlog item | Completion criteria |
+|---|---|---|
+| SEND-01 | Provider-agnostic transport adapters | Prefer a verified payer portal/API route; support tracked fax only as a verified fallback. Define common prepare/send/status/cancel capabilities with explicit unsupported operations, preserving payer-specific identifiers and receipts. EHR, AI, and transport vendors remain replaceable. Do not implement a vendor connection until access and terms are verified. |
+| SEND-02 | Final human send approval | Require a separate, explicit human approval of the **current immutable packet and destination** immediately before sending. A packet, attachment, manifest, or destination change invalidates that approval. Keep clinical packet review, send authorization, workflow execution, and payer decisions separate; no automatic approval or send. Reject stale or revoked approvals server-side, including operational artifact downloads. |
+| SEND-03 | Durable send ledger | Bind each send intent to packet version/hash, destination, workflow, approving actor, idempotency key, attempt, provider request ID, and timestamps. Persist the intent before transmission. On an ambiguous timeout, reconcile provider status before retrying; do not blindly resend. Repeated clicks, restarts, and concurrent requests must not create duplicate deliveries. |
+| SEND-04 | Delivery states and callbacks | Track `prepared`, `transport_accepted`, `delivered`, `payer_acknowledged`, `accepted_for_processing`, and `decision` independently from case and job state. Retain failures and partial delivery as explicit outcomes. A transport receipt is not payer acceptance or a coverage decision. Authenticate callbacks, reject replay, deduplicate events, handle out-of-order updates without losing history, and reconcile missed callbacks. Require review before retrying partial or uncertain delivery. |
+| SEND-05 | Inbound association, audit, and retention | Associate inbound responses using verified references; route ambiguous matches to human review rather than attaching to a guessed case. Audit packet/destination changes, approval, send attempts, callbacks, reconciliation, and human corrections without leaking document contents into logs. Define retention, access, recovery, and deletion rules across the application, hosting, and transport provider, including retained callback files and fax artifacts. |
+
+Acceptance must include synthetic contract tests for stale/revoked approval,
+duplicate clicks, concurrent sends, timeout-after-acceptance, restart recovery,
+forged/replayed callbacks, out-of-order events, partial fax delivery, mismatched
+inbound references, and loss of provider status. Preserve the current manual
+handoff/receipt semantics until a separately reviewed transport implementation
+exists; a human-entered receipt must not become a verified delivery event.
+
+### Research and selection gates
+
+Primary-source research checked **2026-10-28**. Reverify access, supported
+workflows, pricing, contracts, and documentation before selecting a vendor or
+implementing an adapter. No vendor has been chosen, and a marketing compliance
+claim does not establish this application's compliance.
+
+| Candidate or route | Evidence and remaining question |
+|---|---|
+| Anthem / Availity | The [Anthem New York PA page](https://providers.anthem.com/new-york-provider/claims/prior-authorization-requirements) prefers ICR through Availity for its stated PA scope; this does not establish every state's, plan's, or appeal's route. [Availity Service Reviews add-on documentation](https://developer.availity.com/blog/2025/3/4/service-reviews) currently marks IsAuthRequired unavailable to new customers and Attachments as a closed pilot unavailable to new customers. Verify payer participation and actual access before promising an API workflow. |
+| UnitedHealthcare / Optum medical | The [UHC API overview](https://www.uhcprovider.com/en/resource-library/Application-Programming-Interface.html) describes Optum Real APIs and currently lists Real Prior Authorization as coming soon. Confirm the exact medical plan, transaction, onboarding requirements, and availability; the name “Optum” alone is insufficient routing evidence. |
+| Optum Rx | The [Optum Rx e-PA page](https://business.optum.com/en/pharmacy-services/electronic-prior-authorization.html) describes medication requests and plan-specific questions. Keep pharmacy-benefit e-PA distinct from medical PA and claim appeals; first confirm which benefit and organization the practice means. |
+| Fax candidates: Phaxio, SRFax, Documo | Compare [Phaxio pricing](https://www.phaxio.com/pricing/) and [account/security requirements](https://www.phaxio.com/docs/security/hipaa), [SRFax healthcare plans/API offering](https://www.srfax.com/fax-plans/healthcare-solutions/), and [Documo cloud fax](https://www.documo.com/cloud-fax/). These are research placeholders. Verify API access, signed callback support, status/partial-delivery semantics, BAA eligibility, storage/retention controls, support, and full cost at the practice's expected volume. No account, contract, number, or credential is authorized by this backlog. |
+| PHI readiness | [HHS cloud-computing guidance](https://www.hhs.gov/hipaa/for-professionals/special-topics/health-information-technology/cloud-computing/index.html) requires appropriate BAAs and risk analysis/risk management when applicable; encryption alone does not remove a cloud provider's business-associate obligations. Before PHI, review the full hosting/transport chain, security responsibilities, access controls, logging, retention, backup/recovery, and incident response. A BAA or regex redaction alone is not a compliance guarantee. |
+
+Before prioritizing adapters, obtain the brother's exact payer/state/plan and
+benefit, the initial-PA versus denial/claim workflow, the application/portal used
+today, required forms and destination source, expected monthly cases/pages and
+inbound volume, and the clinician/coordinator review responsibilities. Use those
+answers to select one synthetic pilot workflow and its acceptance criteria;
+leave other carriers and transports behind adapters.
