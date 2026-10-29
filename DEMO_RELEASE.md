@@ -42,7 +42,7 @@ unknown-date/PDF retry restriction remains **403** in the gateway and unavailabl
 in the demo UI. No new fixture, upload, transport, role, or clinical-input scope
 was enabled.
 
-### Candidate verification
+### Candidate verification (application implementation `a3ec3e5`)
 
 Using existing matching dependencies and Node **v24.21.0**, with clean test
 environments, disposable synthetic stores, and loopback-only listeners:
@@ -64,6 +64,59 @@ rendering without clinical free-text receipt entry. The rendering tests are not
 browser click/unmount evidence. Worker handling of corrupt queued payloads was
 not expanded; only metadata reads avoid narrative decoding.
 
+### Local process-runtime follow-up — 2026-10-29
+
+Verification commit: **`8c2376ba132dd6e7051db0a621fc3a84d5ae0699`**. This changes
+only `server/demo/entry.test.ts`; production application and packaging code remain
+identical to the tested `a3ec3e5` implementation. The 312-test result above was not
+repeated or relabeled as a fresh full-suite run.
+
+The focused entry suite passed **4/4 tests**, including an opt-in check against
+the existing built demo assets. Type checking and whitespace checks also passed.
+Run the additional check after building the demo client:
+
+```sh
+MEDAUTH_RUNTIME_ACCEPTANCE_DIST="$PWD/dist" node node_modules/vitest/vitest.mjs run server/demo/entry.test.ts
+```
+
+On Node v24.21.0, the actual `server/demoIndex.ts` child process served the built
+index and the exact entry-asset SHA-256, completed a synthetic Provider approval,
+handoff and fixed receipt, then exited with code 0 on SIGTERM. A distinct Node
+process reopened the same disposable store: existing tester sessions, case,
+audit, durable job, handoff and receipt read back unchanged. The second tester's
+same-ID case stayed unapproved and BILLER approval still returned 403. Both
+testers were logged out, revocation was checked, both processes exited cleanly,
+and owned temporary stores were removed. The child blocks outbound fetches.
+Only the pre-existing non-host test-key fixture was used; no real credential or
+live key was read or configured.
+
+Ordinary entry checks now create their own public asset fixture so they do not
+depend on a prior Vite build; the opt-in check uses the actual built directory.
+Independent review identified a failure-diagnostic risk in string assertions;
+boolean checks now prevent captured output or bearer values from being printed
+as assertion diffs. The final affected tests passed after that correction, and
+the reviewer confirmed the finding closed.
+
+This is **Mac production-entry/process persistence evidence**, not a Linux image,
+container-volume, browser, or hosted-platform pass.
+
+### Container verification blocker — 2026-10-29
+
+The installed Docker CLI is v29.8.0 and Docker Desktop is present, but its selected
+local socket `unix:///Users/anthonylavear/.docker/run/docker.sock` is absent.
+Colima reports stopped and Lima reports no instance. Docker Desktop CLI help
+reported a denied log write at
+`/Users/anthonylavear/Library/Containers/com.docker.docker/Data/log/host/docker-desktop.log`
+with `operation not permitted`. That CLI path was stopped after the access
+failure. No engine-start attempt, alternative engine/remote context, permission
+change, software installation, image pull/build, or registry login followed.
+
+A permitted local engine is required before checking the candidate's Linux/amd64
+image build, locked dependency installation and native binaries, mounted-volume
+UID/permissions, container PID 1/SIGTERM behavior, and container networking/health.
+Those checks remain **unrun**. Starting the existing application on macOS does
+not substitute for them.
+
 ### Remaining gates before a release decision
 
 1. **Actual candidate browser acceptance is pending.** Verify the loaded asset
@@ -81,6 +134,9 @@ not expanded; only metadata reads avoid narrative decoding.
 3. **Push, integration into an existing branch, and deployment require separate
    authorization.** No new vendor, payer transport, real model/EHR connection,
    PHI use, or production-readiness claim is included.
+   The unchanged Blueprint still names `codex/hosted-synthetic-demo`; it does not
+   select this local candidate automatically. A later authorized release must
+   explicitly reconcile and verify its exact source SHA before any deployment.
 
 No candidate preview server was started. An older `4397` practice QA listener,
 if present, belongs to the separate fix workspace and is not this demo build.
