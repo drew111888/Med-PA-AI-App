@@ -1,5 +1,11 @@
 # PDF-only Retry Recovery & Durable Retry-Job Tracking — Handoff
 
+> This source handoff is retained for provenance. The separate local hosted-demo
+> integration candidate, its exact tested commit, and remaining release gates
+> are recorded in [DEMO_RELEASE.md](DEMO_RELEASE.md#local-integration-candidate--2026-10-29).
+> Acceptance of the source branch below does not establish candidate browser or
+> platform acceptance.
+
 **Prepared by:** Anthony LaVear
 **Title:** Lead BSA, SDIT Architecture
 

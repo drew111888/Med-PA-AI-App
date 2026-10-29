@@ -2,6 +2,94 @@
 
 > Current status (2026-10-28): the approved service/disk were created and the actual application is live at https://med-pa-synthetic-demo.onrender.com. See `HOSTED_ACCEPTANCE.md` for exact deployed commit, resource IDs, completed evidence and limits. The approval/setup descriptions below preserve the earlier handoff context.
 
+## Local integration candidate — 2026-10-29
+
+This candidate is **local only and has not been deployed**. The hosted release
+record in `HOSTED_ACCEPTANCE.md` remains separate evidence for `72c4899`, not
+browser or platform acceptance of this candidate.
+
+- Branch: `codex/demo-retry-integration`.
+- Worktree: `/Users/anthonylavear/Documents/Codex/2026-10-24/task/demo-retry-integration`.
+- Tested implementation: **`a3ec3e5c811f8dd3f8c5ca970efcd157ff81ae35`**.
+- Hosted source base: `f6d34d13cd5890527146b8809b5c78b71479fa5f` (documentation
+  above the deployed `72c489985265d4024bd5b2d33e0c3c78b2654e2d` application).
+- Fix source: `c916a78281969d8cdff9d36b92e79c404d96169d`, including implementation
+  `9a675d0d1ca1f3c26d7185134a2b5f83b317e389` and its retry-recovery foundation.
+- A documentation-only follow-up records these results. Resolve the exact local
+  tip with `git rev-parse codex/demo-retry-integration`.
+
+Product changes were ported onto a new branch using the common source base
+`378141d`. No existing branch was merged, reset, pushed, or deployed. Historical
+task-control files were not imported. The three API-client conflicts were
+resolved explicitly: actionable JSON/Blob error details coexist with demo
+`code`/`retryAfter`, expiry/429 classification, same-origin requests, anonymous
+calls, and current-request-token checks. Durable case-scoped job metadata and
+retry results are additive.
+
+The candidate keeps the job display outside retry-action gates, retains
+parent-owned 409 corrective instructions after reconciliation, and rejects
+stale/revoked operational handoff downloads and receipts. Valid current and
+submitted artifacts remain downloadable. The UI requests a download rather
+than claiming a confirmed browser file save.
+
+Seventeen hosted boundary/config files were checked byte-for-byte unchanged,
+including the gateway, per-tester registry, fixed fixtures and limits, demo entry,
+auth/config, session provider, application shell, sidebar, workflow list, demo
+build script, Dockerfile, Blueprint, Vite config, and Docker exclusions. Per-context
+recovery remains owned by the gateway and runs once when that tester's context
+opens; `createApp` has no recovery side effect. No scheduler was added. The fixed
+unknown-date/PDF retry restriction remains **403** in the gateway and unavailable
+in the demo UI. No new fixture, upload, transport, role, or clinical-input scope
+was enabled.
+
+### Candidate verification
+
+Using existing matching dependencies and Node **v24.21.0**, with clean test
+environments, disposable synthetic stores, and loopback-only listeners:
+
+| Check | Result |
+|---|---|
+| Full `vitest run` | **312 passed, 1 live-Athena test skipped; 26 files passed**. |
+| TypeScript `tsc --noEmit` | Passed. |
+| `node scripts/buildDemo.mjs` | Passed; same-origin demo assets built. Existing large-chunk warning remains. |
+| Independent source/coverage review | No blocking findings. |
+| `git diff --check` | Passed. |
+
+Affected coverage includes actionable 409/422 JSON and Blob errors alongside
+429 timing/expiry, late-token responses that cannot clear a replacement session,
+metadata-only job reads, separate tester retry budgets, interrupted recovery
+once per context, unchanged unknown-date denial, stale/revoked download and
+receipt rejection, another tester's valid submitted download, and demo-mode
+rendering without clinical free-text receipt entry. The rendering tests are not
+browser click/unmount evidence. Worker handling of corrupt queued payloads was
+not expanded; only metadata reads avoid narrative decoding.
+
+### Remaining gates before a release decision
+
+1. **Actual candidate browser acceptance is pending.** Verify the loaded asset
+   belongs to this demo-mode build before testing job status after navigation,
+   actionable errors after reconciliation, current/stale downloads, synthetic
+   receipts, role/reset/expiry behavior, and desktop/tablet/phone layouts. Earlier
+   cached practice UI or hosted-demo screenshots do not verify this candidate.
+   No Safari selection was attempted in this preparation pass. The prior private
+   window access denial remains in force; target only the authorized project.
+   Never accept a fresh healthcare agreement on the owner's behalf.
+2. **No candidate container or remote platform run has occurred.** Existing
+   platform evidence belongs to `72c4899`. Preserve the single service/disk,
+   manual release settings and stable host key if a later release is authorized.
+   No key or live environment setting was read or configured here.
+3. **Push, integration into an existing branch, and deployment require separate
+   authorization.** No new vendor, payer transport, real model/EHR connection,
+   PHI use, or production-readiness claim is included.
+
+No candidate preview server was started. An older `4397` practice QA listener,
+if present, belongs to the separate fix workspace and is not this demo build.
+Use the exact candidate and a disposable isolated demo store for later browser QA.
+
+---
+
+The sections below retain the original hosted release/setup context.
+
 This local release is based on accepted application commit `378141dcc5d5b7b41b67e99c79b4b7854ff7af82`. It is separate from Kiro's active PDF retry branch and the already published static concept. Do not deploy the older remote `main` in its place.
 
 ## Boundaries
