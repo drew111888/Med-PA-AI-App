@@ -2,11 +2,13 @@
 
 > Current status (2026-10-28): the approved service/disk were created and the actual application is live at https://med-pa-synthetic-demo.onrender.com. See `HOSTED_ACCEPTANCE.md` for exact deployed commit, resource IDs, completed evidence and limits. The approval/setup descriptions below preserve the earlier handoff context.
 
-## Local integration candidate — 2026-10-29
+## Integration candidate — 2026-10-29–30
 
-This candidate is **local only and has not been deployed**. The hosted release
-record in `HOSTED_ACCEPTANCE.md` remains separate evidence for `72c4899`, not
-browser or platform acceptance of this candidate.
+The feature source was published at `ea16fd8eaa75b02996d2bb5c5927b2a2aa9c04b4`.
+It has **not been deployed to the Render demo**. The hosted release record in
+`HOSTED_ACCEPTANCE.md` remains separate evidence for `72c4899`, not platform
+acceptance of this candidate. The later test/evidence additions below are local
+and have not been pushed.
 
 - Branch: `codex/demo-retry-integration`.
 - Worktree: `/Users/anthonylavear/Documents/Codex/2026-10-24/task/demo-retry-integration`.
@@ -15,11 +17,11 @@ browser or platform acceptance of this candidate.
   above the deployed `72c489985265d4024bd5b2d33e0c3c78b2654e2d` application).
 - Fix source: `c916a78281969d8cdff9d36b92e79c404d96169d`, including implementation
   `9a675d0d1ca1f3c26d7185134a2b5f83b317e389` and its retry-recovery foundation.
-- A documentation-only follow-up records these results. Resolve the exact local
+- Test and evidence follow-ups record these results. Resolve the exact local
   tip with `git rev-parse codex/demo-retry-integration`.
 
 Product changes were ported onto a new branch using the common source base
-`378141d`. No existing branch was merged, reset, pushed, or deployed. Historical
+`378141d`. No existing branch was merged or reset during integration. Historical
 task-control files were not imported. The three API-client conflicts were
 resolved explicitly: actionable JSON/Blob error details coexist with demo
 `code`/`retryAfter`, expiry/429 classification, same-origin requests, anonymous
@@ -169,32 +171,95 @@ These records summarize tool observations rather than an exported raw browser
 or network trace. Independent documentation/evidence review found no blocking
 contradiction. Foreground control was released for the other project tasks.
 
-Limits: this was a single Safari tab with role switching, not simultaneous
-independent browser clients or a real device. Full reload intentionally abandons
+Limits: this Safari pass used a single tab with role switching. The separate
+two-tab check below adds independent document coverage, not real-device or
+cross-browser coverage. Full reload intentionally abandons
 the in-memory token; its old sandbox expires under the existing server limits.
-No fresh wall-clock expiry wait, browser process-kill/restart, stale approval
-POST from an old review form, or confirmed file save was performed. Existing
+This Safari pass did not test a fresh wall-clock expiry wait, browser
+process-kill/restart or a stale approval POST from an old review form, and did
+not confirm a file save. Existing
 automated isolation/version tests and Mac process-restart evidence remain
 separate results. No full suite was repeated for documentation-only changes.
 
+### Independent clients and real-clock expiry follow-up — 2026-10-30
+
+Two new regression files exercise the real gateway over loopback HTTP with
+disposable encrypted SQLite stores. `concurrentClients.test.ts` initiates requests
+from separate bearer sessions together: same-ID intake, Provider/Biller approval,
+artifact ownership, durable retry jobs and budgets, reset while another client
+retries, and logout while another reads. The gateway intentionally serializes
+mutations; a known `demo_busy` response is reconciled once after both responses
+settle. This is not proof of simultaneous SQLite writes.
+
+`expiryRuntime.test.ts` uses actual `Date.now`, elapsed timers and HTTP requests;
+it does not inject a clock or mock the gateway. Short test-only factory limits
+verify idle extension, an absolute lifetime that activity cannot extend,
+unauthorized reads/writes after expiry, generation cleanup, capacity reuse and
+another active tester's retained case. Production defaults are unchanged. Both
+files passed independent review, type checking and whitespace checks. The fresh
+full suite passed **316 tests, with 2 skipped, across 28 files**. The skips are
+live Athena and the opt-in built-client process check; the latter's prior separate
+4/4 runtime result remains the evidence recorded above.
+
+Actual browser actions also passed in two separate React documents in one
+in-app browser profile, using the exact validated entry asset. Provider A and
+Biller B started independent sessions and initiated same-ID fixture intake
+together. A's approval/handoff did not change B's ready case or grant approval;
+A's reset and logout did not remove B's case, interrupt its retry or change its
+durable job. Both sessions were logged out and only the owned tabs were closed.
+These observations establish independent-document behavior, not separate browser
+vendors, profiles or devices. Sanitized observations are recorded in the task's
+`demo-integration-evidence/two-tab-concurrency.json`.
+
+Default-limit elapsed-time coverage remains **incomplete**. Two dedicated
+15-minute-idle/30-minute-absolute probes were interrupted by execution-connection
+recovery before their boundary assertions. The last saved fresh-run record was
+`2026-10-30T01:29:13.229392Z`: 481.845 elapsed seconds, 25 successful keepalives,
+and no expiry-result milestone. Neither run is counted as a default-limit pass.
+A retained browser's expiry observation also failed when browser transport
+closed; no expired UI/HTTP result was confirmed. No app defect is established
+by these infrastructure failures. Further approval-triggering attempts were
+paused after the owner reported an approval loop; no Docker path was retried.
+
+These checks use synthetic fixtures, the existing non-host test key and no live
+credentials. No application, deployment configuration or dependency changed.
+The HTTP tests and browser observations are distinct from production-entry,
+Linux-container and hosted Render acceptance.
+
+### Source publication — 2026-10-30
+
+The owner approved publishing this feature branch even if the two existing
+Vercel projects automatically deployed it. Remote
+`codex/demo-retry-integration` was verified at **`ea16fd8`**; main, the hosted
+branch and Render settings were unchanged. Both automatic Vercel deployments
+and the Vercel Preview Comments check completed successfully for that exact
+commit. No GitHub Actions run existed for the SHA. Deployment/check success is
+not backend workflow acceptance. The test/evidence follow-up remains local and
+unpublished: another push could create more automatic Vercel deployments and is
+currently on hold.
+
 ### Remaining gates before a release decision
 
-1. **Bounded local browser acceptance passed as recorded above.** Any broader
-   browser/device, simultaneous-client, wall-clock expiry or file-save claims
-   require additional evidence. The prior unrelated-private-window restriction
+1. **Bounded local browser and independent-client acceptance passed as recorded
+   above.** Default-limit elapsed-time/browser-expiry coverage remains incomplete
+   after technical interruptions. Broader browser/device, stale approval POST,
+   browser process-kill/restart and confirmed file-save claims require additional
+   evidence. The prior unrelated-private-window restriction
    was respected. Never accept a healthcare agreement on the owner's behalf.
 2. **No candidate container or remote platform run has occurred.** Existing
    platform evidence belongs to `72c4899`. Preserve the single service/disk,
    manual release settings and stable host key if a later release is authorized.
    No key or live environment setting was read or configured here.
-3. **Push, integration into an existing branch, and deployment require separate
-   authorization.** No new vendor, payer transport, real model/EHR connection,
+3. **Further publication, integration into an existing branch, and Render
+   deployment remain separate decisions.** The existing feature publication did
+   not authorize another push with further automatic Vercel deployments. No new
+   vendor, payer transport, real model/EHR connection,
    PHI use, or production-readiness claim is included.
    The unchanged Blueprint still names `codex/hosted-synthetic-demo`; it does not
    select this local candidate automatically. A later authorized release must
    explicitly reconcile and verify its exact source SHA before any deployment.
 
-The candidate preview is running at `http://127.0.0.1:4397/` from this worktree's
+The candidate preview was last verified at `http://127.0.0.1:4397/` from this worktree's
 validated demo build, using a dedicated store outside public assets. It replaced
 the stopped listener, not the former practice-QA database. It is available only
 while the Mac and local process remain running; this is not a hosted release.
