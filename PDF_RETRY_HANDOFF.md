@@ -5,6 +5,9 @@
 > are recorded in [DEMO_RELEASE.md](DEMO_RELEASE.md#local-integration-candidate--2026-10-29).
 > Acceptance of the source branch below does not establish candidate browser or
 > platform acceptance.
+> The source-QA server and browser-gate descriptions below are historical.
+> Port 4397 now serves the isolated demo candidate; its later actual Safari
+> acceptance and limits are recorded in `DEMO_RELEASE.md`.
 
 **Prepared by:** Anthony LaVear
 **Title:** Lead BSA, SDIT Architecture

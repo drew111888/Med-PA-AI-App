@@ -117,16 +117,72 @@ UID/permissions, container PID 1/SIGTERM behavior, and container networking/heal
 Those checks remain **unrun**. Starting the existing application on macOS does
 not substitute for them.
 
+### Local candidate browser acceptance — 2026-10-29–30 UTC
+
+The owner confirmed MedAuth was the front Safari page and handed over browser
+control. After one transient native-selection timeout, supported metadata was
+checked before recovering the read-only target. The recovered page was
+`http://127.0.0.1:4397/`; Safari's Sources view showed the actual loaded
+`/assets/index-XqMMHNI4.js`. Its served SHA-256 matched
+`a91e5df9386169168dee4c57bf5dfe6ea1e4345712970bb795bb167459cf6556`.
+This verifies the demo build of application implementation `a3ec3e5`, at local
+documentation/test tip **`b9dd377f70ee303d1f58aefa3e982af6ec229872`**.
+
+The preview runs `server/demoIndex.ts` on Node 24, bound only to
+`127.0.0.1:4397`, with a separate owned demo store. The former practice-QA store
+was preserved. Health reports synthetic EHR, local-stub AI, cloud disabled, and
+registry/assets ready; server outbound fetches are blocked. No real credential,
+healthcare agreement, live connection, or hosted setting was used or changed.
+
+| Actual Safari check | Observed result |
+|---|---|
+| Packet-ready job after Dashboard/Cases remount and refresh | Same completed job/attempt metadata remained visible outside retry controls. |
+| Approval acknowledgment and repeated clicks | Approval disabled before acknowledgment; double-click created one approved audit entry. |
+| Current handoff download | Backend artifact became a browser Blob; UI said **Download requested**. Safari's download-permission prompt was canceled; file save was not verified or claimed. |
+| Newer packet invalidates old artifact | Cached download returned an actionable conflict; reconciliation disabled download and receipt. |
+| Approval revoked at the same version | Cached download returned an approval conflict; no Blob/download prompt appeared. |
+| Cached receipt for a stale handoff | Conflict returned; receipt stayed absent and actions became disabled. |
+| Missing retry fields (422) | Named `carcCodes_or_rarcCodes` and displayed the upstream correction. |
+| Missing denial row (409) | Parent-owned missing-row heading, missing field and re-import action survived panel reconciliation and list refresh. |
+| Repeated retry, durable job and limit | Double-click produced one retry; a second allowed retry reused the same job. A third was blocked by the demo limit. |
+| Unknown-date sample | Needs-review, explicit unknown deadline and blocker, no approval/retry action; latest job remained visible. |
+| Provider/Biller boundary and receipt readback | Role switch retained the workspace; Biller had no ready-packet approval controls, could record the valid fixed synthetic receipt, and its receipt/audit persisted after navigation. |
+| Reset/cancel/empty state | Cancel preserved work; confirmed reset created an empty generation with no jobs. Biller could run a fresh fixture, without gaining approval controls. |
+| Responsive navigation/layout | Visually inspected Safari viewports 390×844, 820×1180 and 1280×900; mobile navigation worked and controls remained available. Responsive mode was exited afterward. |
+| Full reload and fresh entry | Reload returned to the explained in-memory-session entry screen; a new Provider session had zero cases. Leave demo returned to entry. |
+
+Five reversible, guarded faults were applied only to the uniquely identified
+owned synthetic generation: two packet-version invalidations, one approval
+revocation, missing codes, and a missing normalized denial row. These were test
+fixture changes, not exposed editing/revocation product features. Every fault
+was restored before the next. A separate read-only capture before UI reset
+confirmed three cases/denials/jobs, no duplicate associations/keys or foreign-key
+violations, one approval, one submission, and two retry-request audit entries.
+The held case's original job was done at attempt 3. No receipt was written by the
+stale action. No product-code correction was needed during this browser pass.
+
+Sanitized supporting records are in the task's
+`demo-integration-evidence/browser-db-check.json` and `browser-acceptance.json`;
+they contain no bearer values, keys, or encrypted narrative payloads. Earlier
+browser-target blockers remain historical evidence, not the final status.
+These records summarize tool observations rather than an exported raw browser
+or network trace. Independent documentation/evidence review found no blocking
+contradiction. Foreground control was released for the other project tasks.
+
+Limits: this was a single Safari tab with role switching, not simultaneous
+independent browser clients or a real device. Full reload intentionally abandons
+the in-memory token; its old sandbox expires under the existing server limits.
+No fresh wall-clock expiry wait, browser process-kill/restart, stale approval
+POST from an old review form, or confirmed file save was performed. Existing
+automated isolation/version tests and Mac process-restart evidence remain
+separate results. No full suite was repeated for documentation-only changes.
+
 ### Remaining gates before a release decision
 
-1. **Actual candidate browser acceptance is pending.** Verify the loaded asset
-   belongs to this demo-mode build before testing job status after navigation,
-   actionable errors after reconciliation, current/stale downloads, synthetic
-   receipts, role/reset/expiry behavior, and desktop/tablet/phone layouts. Earlier
-   cached practice UI or hosted-demo screenshots do not verify this candidate.
-   No Safari selection was attempted in this preparation pass. The prior private
-   window access denial remains in force; target only the authorized project.
-   Never accept a fresh healthcare agreement on the owner's behalf.
+1. **Bounded local browser acceptance passed as recorded above.** Any broader
+   browser/device, simultaneous-client, wall-clock expiry or file-save claims
+   require additional evidence. The prior unrelated-private-window restriction
+   was respected. Never accept a healthcare agreement on the owner's behalf.
 2. **No candidate container or remote platform run has occurred.** Existing
    platform evidence belongs to `72c4899`. Preserve the single service/disk,
    manual release settings and stable host key if a later release is authorized.
@@ -138,9 +194,10 @@ not substitute for them.
    select this local candidate automatically. A later authorized release must
    explicitly reconcile and verify its exact source SHA before any deployment.
 
-No candidate preview server was started. An older `4397` practice QA listener,
-if present, belongs to the separate fix workspace and is not this demo build.
-Use the exact candidate and a disposable isolated demo store for later browser QA.
+The candidate preview is running at `http://127.0.0.1:4397/` from this worktree's
+validated demo build, using a dedicated store outside public assets. It replaced
+the stopped listener, not the former practice-QA database. It is available only
+while the Mac and local process remain running; this is not a hosted release.
 
 ---
 
